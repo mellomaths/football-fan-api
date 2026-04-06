@@ -1,19 +1,62 @@
 services:
-  football-fan-api:
-    container_name: football-fan-api
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: football
+      POSTGRES_PASSWORD: football
+      POSTGRES_DB: football
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U football -d football"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgadmin:
+    image: dpage/pgadmin4:8
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
     build:
-      context: .
+      context: ./api
       dockerfile: Dockerfile
     ports:
-      - "3002:3000"
+      - "8080:8080"
     environment:
-      - PY_ENV=production
-      - POSTGRES__HOST=192.168.1.100
-      - REDIS__HOST=192.168.1.100
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/up"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-  
+      # checkov:skip=CKV_SECRET_4: documented local-only credentials for Compose networking
+      DATABASE_URL: postgres://football:football@postgres:5432/football?sslmode=disable
+      HTTP_ADDR: ":8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  scraper:
+    build:
+      context: ./scrappers
+      dockerfile: Dockerfile
+    environment:
+      # checkov:skip=CKV_SECRET_4: documented local-only credentials for Compose networking
+      DATABASE_URL: postgres://football:football@postgres:5432/football?sslmode=disable
+      SCRAPER_INTERVAL_HOURS: ${SCRAPER_INTERVAL_HOURS:-24}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SCRAPER_CRON: ${SCRAPER_CRON:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  pgadmin_data:
