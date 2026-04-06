@@ -51,7 +51,9 @@ The server uses Go 1.22 `net/http` `ServeMux` with method-specific patterns:
 - `GET /healthz` — liveness
 - `GET /teams` — list registered teams
 - `GET /teams/{teamId}` — one team by id (metadata from `teams` row)
+- `PATCH /teams/{teamId}` — update `ticket_sale_url` (optional JSON body field)
 - `GET /teams/{teamId}/matches` — matches for a team in a date window
+- `GET /teams/{teamId}/tickets/announcements` — scraped ticket announcement blobs for the team (seller)
 
 Path parameters are read with `Request.PathValue("teamId")`.
 
@@ -68,6 +70,7 @@ Returns a JSON array of teams, ordered by primary competition code then name (sa
 - `id` — stable integer id (assigned when the club row is first created, usually by a scraper)
 - `name` — display name
 - `short_name`, `espn_slug`, `soccerway_id` — strings from the `teams` row when set; omitted when null or empty in the database
+- `ticket_sale_url` — optional absolute URL used by ticket scrapers (e.g. a club news listing); omitted when unset
 
 Example:
 
@@ -82,6 +85,7 @@ Returns **`200`** and a JSON object:
 - `id` — team id  
 - `name` — display name  
 - `short_name`, `espn_slug`, `soccerway_id` — strings from the `teams` row when set; omitted when null or empty in the database
+- `ticket_sale_url` — optional; omitted when unset
 
 Example:
 
@@ -94,6 +98,26 @@ Errors:
 - `400` — invalid `teamId`
 - `404` — unknown team id
 - `500` — database or internal failure
+
+#### `PATCH /teams/{teamId}`
+
+Request body: JSON object. Optional field **`ticket_sale_url`**: an `http` or `https` URL string (max 1024 characters), or JSON **`null`** to clear the column. If the field is **omitted**, the stored URL is unchanged.
+
+Returns **`200`** with the updated team object (same shape as `GET /teams/{teamId}`).
+
+Errors:
+
+- `400` — invalid JSON, invalid URL, or empty string where a URL is required
+- `404` — unknown team id
+- `500` — database or internal failure
+
+Example:
+
+```bash
+curl -s -X PATCH http://localhost:8080/teams/1 \
+  -H "Content-Type: application/json" \
+  -d '{"ticket_sale_url":"https://www.flamengo.com.br/noticias/futebol"}'
+```
 
 #### `GET /teams/{teamId}/matches`
 
@@ -124,6 +148,37 @@ curl -s "http://localhost:8080/teams/1/matches?from=2026-04-01&to=2026-04-30"
 Errors:
 
 - `400` — missing/invalid dates, invalid `teamId`, or validation message in JSON `{"error":"..."}`
+- `404` — unknown `teamId`
+- `500` — database or internal failure
+
+#### `GET /teams/{teamId}/tickets/announcements`
+
+Query parameters **`from`** and **`to`** are **required**. Both are instants in **RFC3339** (or RFC3339Nano), interpreted in **UTC** (e.g. `2026-04-09T00:30:00Z`).
+
+Rules:
+
+1. Both must parse as RFC3339 timestamps.
+2. `from` must be on or before `to`.
+3. The span from `from` through `to` must be **at most 90 days**.
+
+**Filter:** Rows from `footballfan.ticket_announcements` where `seller_team_id` equals `teamId` and `scraped_at` is **between `from` and `to` inclusive** (UTC). Newest `scraped_at` first.
+
+Response: JSON array. Each element has:
+
+- `sale_schedule_text` — full text of the sale-schedule section from the club article  
+- `prices_text` — full text of the prices / serviços section  
+- `scraped_at` — RFC3339 UTC when the row was last scraped  
+- `match` — when the scraper linked a fixture, the same match object shape as in `GET /teams/{teamId}/matches` (`id`, `kickoff_utc`, optional `location`, `home`, `away`, `competition`); JSON **`null`** when not linked
+
+Example:
+
+```bash
+curl -s "http://localhost:8080/teams/6/tickets/announcements?from=2026-04-01T00:00:00Z&to=2026-04-30T23:59:59Z"
+```
+
+Errors:
+
+- `400` — missing/invalid `from` or `to`, span over 90 days, or invalid `teamId`
 - `404` — unknown `teamId`
 - `500` — database or internal failure
 

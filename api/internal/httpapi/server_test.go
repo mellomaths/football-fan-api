@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,11 +15,12 @@ import (
 )
 
 type stubStore struct {
-	teams    []db.Team
-	teamByID map[int64]db.Team
-	exists   map[int64]bool
-	matches  []db.Match
-	err      error
+	teams         []db.Team
+	teamByID      map[int64]db.Team
+	exists        map[int64]bool
+	matches       []db.Match
+	announcements []db.TicketAnnouncement
+	err           error
 }
 
 func (s *stubStore) ListTeams(_ context.Context) ([]db.Team, error) {
@@ -38,6 +40,21 @@ func (s *stubStore) GetTeamByID(_ context.Context, teamID int64) (db.Team, error
 	return db.Team{}, db.ErrTeamNotFound
 }
 
+func (s *stubStore) PatchTeamTicketSaleURL(_ context.Context, teamID int64, patch db.TeamTicketSalePatch) (db.Team, error) {
+	if s.err != nil {
+		return db.Team{}, s.err
+	}
+	d, ok := s.teamByID[teamID]
+	if !ok {
+		return db.Team{}, db.ErrTeamNotFound
+	}
+	if patch.TicketSaleURLSet {
+		d.TicketSaleURL = patch.TicketSaleURL
+	}
+	s.teamByID[teamID] = d
+	return d, nil
+}
+
 func (s *stubStore) TeamExists(_ context.Context, teamID int64) (bool, error) {
 	if s.err != nil {
 		return false, s.err
@@ -54,6 +71,87 @@ func (s *stubStore) ListMatchesForTeam(
 		return nil, s.err
 	}
 	return s.matches, nil
+}
+
+func (s *stubStore) ListTicketAnnouncementsForTeam(
+	_ context.Context,
+	_ int64,
+	_, _ time.Time,
+) ([]db.TicketAnnouncement, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.announcements, nil
+}
+
+func TestHandleTeamTicketAnnouncementsValidation(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st := &stubStore{exists: map[int64]bool{1: true}}
+	srv := NewServer(log, st)
+
+	req := httptest.NewRequest(http.MethodGet, "/teams/1/tickets/announcements", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400", rec.Code)
+	}
+}
+
+func TestHandleTeamTicketAnnouncementsOK(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	m := &db.Match{
+		ID:         132,
+		KickoffUTC: "2026-04-09T00:30:00Z",
+		Location:   &db.LocationRef{Name: "Estadio Inca Garcilaso de la Vega"},
+		Home:       db.TeamMatchSide{ID: 57, Name: "Cusco FC", ShortName: strPtr("Cusco FC"), EspnSlug: strPtr("cusco-fc")},
+		Away:       db.TeamMatchSide{ID: 6, Name: "Flamengo", ShortName: strPtr("Flamengo"), EspnSlug: strPtr("flamengo")},
+		Competition: db.CompetitionRef{
+			ID:   3,
+			Name: "Copa Libertadores",
+			Code: "COPA_LIBERTADORES",
+		},
+	}
+	st := &stubStore{
+		exists: map[int64]bool{6: true},
+		announcements: []db.TicketAnnouncement{
+			{
+				SaleScheduleText: "Data e hora das aberturas de vendas...",
+				PricesText:       "Valores:",
+				ScrapedAt:        "2026-04-09T00:30:00Z",
+				Match:            m,
+			},
+		},
+	}
+	srv := NewServer(log, st)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/teams/6/tickets/announcements?from=2026-04-01T00:00:00Z&to=2026-04-30T23:59:59Z",
+		nil,
+	)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", rec.Code)
+	}
+	var out []db.TicketAnnouncement
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 || out[0].SaleScheduleText != "Data e hora das aberturas de vendas..." {
+		t.Fatalf("unexpected body: %+v", out)
+	}
+	if out[0].Match == nil || out[0].Match.ID != 132 || out[0].Match.Away.Name != "Flamengo" {
+		t.Fatalf("unexpected match: %+v", out[0].Match)
+	}
+}
+
+func strPtr(s string) *string {
+	return &s
 }
 
 func TestHandleTeamMatchesValidation(t *testing.T) {
@@ -160,5 +258,65 @@ func TestHandleTeamByIDNotFound(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status %d, want 404", rec.Code)
+	}
+}
+
+func TestHandlePatchTeamTicketSaleURL(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	u := "https://www.flamengo.com.br/noticias/futebol"
+	st := &stubStore{
+		teamByID: map[int64]db.Team{
+			1: {ID: 1, Name: "Flamengo", ShortName: "FLA"},
+		},
+	}
+	srv := NewServer(log, st)
+
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/teams/1",
+		strings.NewReader(`{"ticket_sale_url":"https://www.flamengo.com.br/noticias/futebol"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", rec.Code)
+	}
+	var out db.Team
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.TicketSaleURL == nil || *out.TicketSaleURL != u {
+		t.Fatalf("unexpected ticket_sale_url: %+v", out.TicketSaleURL)
+	}
+}
+
+func TestHandlePatchTeamClearTicketSaleURL(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	u := "https://example.com/x"
+	st := &stubStore{
+		teamByID: map[int64]db.Team{
+			1: {ID: 1, Name: "A", TicketSaleURL: &u},
+		},
+	}
+	srv := NewServer(log, st)
+
+	req := httptest.NewRequest(http.MethodPatch, "/teams/1", strings.NewReader(`{"ticket_sale_url":null}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", rec.Code)
+	}
+	var out db.Team
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.TicketSaleURL != nil {
+		t.Fatalf("want nil ticket_sale_url, got %+v", out.TicketSaleURL)
 	}
 }

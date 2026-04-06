@@ -268,6 +268,97 @@ def ensure_team_id(
     return new_id
 
 
+def list_teams_with_ticket_sale_url(conn: psycopg.Connection) -> list[tuple[int, str, str]]:
+    """Return (team_id, ticket_sale_url, name) for teams with a non-empty ticket_sale_url."""
+    out: list[tuple[int, str, str]] = []
+    with conn.cursor() as cur:
+        cur.execute(
+            sql.SQL("""
+            SELECT id, name, ticket_sale_url
+            FROM {}
+            WHERE ticket_sale_url IS NOT NULL AND btrim(ticket_sale_url) <> ''
+            ORDER BY id
+            """).format(table("teams"))
+        )
+        for row in cur.fetchall():
+            assert isinstance(row, dict)
+            tid = int(row["id"])
+            name = str(row["name"])
+            url = str(row["ticket_sale_url"]).strip()
+            out.append((tid, url, name))
+    return out
+
+
+def upsert_ticket_announcement(
+    conn: psycopg.Connection,
+    *,
+    seller_team_id: int,
+    match_id: int | None,
+    source: str,
+    source_url: str,
+    sale_schedule_text: str,
+    prices_text: str,
+) -> None:
+    """One row per source article: full scraped section blobs."""
+    with conn.cursor() as cur:
+        cur.execute(
+            sql.SQL("""
+            INSERT INTO {} (
+                seller_team_id, match_id, source, source_url,
+                sale_schedule_text, prices_text, scraped_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, now())
+            ON CONFLICT (seller_team_id, source, source_url) DO UPDATE SET
+                match_id = EXCLUDED.match_id,
+                sale_schedule_text = EXCLUDED.sale_schedule_text,
+                prices_text = EXCLUDED.prices_text,
+                scraped_at = EXCLUDED.scraped_at
+            """).format(table("ticket_announcements")),
+            (
+                seller_team_id,
+                match_id,
+                source,
+                source_url,
+                sale_schedule_text,
+                prices_text,
+            ),
+        )
+
+
+def find_home_match_id(
+    conn: psycopg.Connection,
+    *,
+    home_team_id: int,
+    away_name_substr: str | None,
+) -> int | None:
+    """Best-effort: upcoming home match where away team name matches a substring."""
+    if not away_name_substr:
+        return None
+    key = away_name_substr.strip()
+    if len(key) < 2:
+        return None
+    like = f"%{key}%"
+    with conn.cursor() as cur:
+        cur.execute(
+            sql.SQL("""
+            SELECT m.id
+            FROM {} m
+            JOIN {} at ON at.id = m.away_team_id
+            WHERE m.home_team_id = %s
+              AND m.kickoff_utc > now() - interval '2 days'
+              AND at.name ILIKE %s
+            ORDER BY m.kickoff_utc ASC
+            LIMIT 1
+            """).format(table("matches"), table("teams")),
+            (home_team_id, like),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        assert isinstance(row, dict)
+        return int(row["id"])
+
+
 def competition_id_for_code(conn: psycopg.Connection, competition_code: str) -> int | None:
     with conn.cursor() as cur:
         cur.execute(
