@@ -1,0 +1,28 @@
+---
+alwaysApply: true
+---
+
+# Project Go skills (`.agents/skills`)
+
+This repo vendors **samber/cc-skills-golang** under [`.agents/skills/`](.agents/skills/). Each folder has a **`SKILL.md`** (and optional `references/`).
+
+**When working on Go code, tests, docs, or tooling in this repository:** identify which topics apply, **read the matching `SKILL.md` with the Read tool** before writing or reviewing, and follow its guidance. If several apply (e.g. naming + errors), read those files in an order that makes sense (often: naming → code style → error handling → testing).
+
+| Topic | Path to read |
+|-------|----------------|
+| Code style, formatting, comments, linters | `.agents/skills/golang-code-style/SKILL.md` |
+| Naming (packages, types, errors, tests) | `.agents/skills/golang-naming/SKILL.md` |
+| Slices, maps, generics, `container/` | `.agents/skills/golang-data-structures/SKILL.md` |
+| `database/sql`, pgx, queries, transactions | `.agents/skills/golang-database/SKILL.md` |
+| Design patterns, architecture, DI, shutdown | `.agents/skills/golang-design-patterns/SKILL.md` |
+| Godoc, README patterns, project docs | `.agents/skills/golang-documentation/SKILL.md` |
+| Errors, wrapping, `slog`, HTTP logging | `.agents/skills/golang-error-handling/SKILL.md` |
+| Modern Go, upgrades, linters | `.agents/skills/golang-modernize/SKILL.md` |
+| Nil safety, defensive coding | `.agents/skills/golang-safety/SKILL.md` |
+| Security, crypto, injection, secrets | `.agents/skills/golang-security/SKILL.md` |
+| Tests, table-driven, CI, coverage | `.agents/skills/golang-testing/SKILL.md` |
+| Debugging, pprof, race, Delve | `.agents/skills/golang-troubleshooting/SKILL.md` |
+
+**Defaults:** If the task is broad Go work in `api/`, at minimum consider **code-style**, **naming**, **error-handling**, and **testing**. For **debugging or unexplained failures**, read **troubleshooting** first.
+
+Do not paste entire skills into replies; apply them in code and explanations. For deep detail, follow `references/` links from each `SKILL.md` when needed.

@@ -1,399 +1,150 @@
 # Football Fan API
 
-A FastAPI-based web service that provides football match information by scraping data from ESPN. The application is designed to fetch upcoming matches for specific teams and expose them through a REST API.
+This repository contains a small system for **scheduled Brazilian football fixtures**: national leagues (e.g. Brasileirão), continental and domestic cups (e.g. Libertadores, Sul-Americana, Copa do Brasil), with room to extend to **estaduais** and other competitions. A **Python** service scrapes public sources and writes to **PostgreSQL**; a **Go** HTTP API reads from the same database for clients.
 
-## 🏗️ Architecture
+## Requirements
 
-The application follows a clean architecture pattern with the following structure:
+- **Go** 1.22+ (for local API development)
+- **Python** 3.11+ and **[uv](https://docs.astral.sh/uv/)** (for local scraper development and lockfile management)
+- **PostgreSQL** 14+ (16 used in Docker)
+- **Docker** and **Docker Compose** (recommended for running everything together)
+- **[just](https://github.com/casey/just)** (optional; repo root `Justfile` wraps Compose for start/stop/logs)
 
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph scrapers [Python scrapers]
+    ESPN[ESPN adapter]
+    SW[Soccerway adapter]
+    ESPN --> Upsert[Upsert matches]
+    SW --> Upsert
+  end
+  Upsert --> PG[(PostgreSQL)]
+  API[Go API] --> PG
+  Clients[Clients] --> API
 ```
-src/
-├── main.py                 # FastAPI application entry point
-├── api.py                  # API router configuration
-├── controllers/            # API controllers
-│   └── matches_controller.py
-├── models/                 # Pydantic data models
-│   ├── matches_response.py
-│   └── up_response.py
-├── infrastructure/         # Infrastructure components
-│   ├── logger.py
-│   └── settings.py
-└── scrappers/             # Data scraping modules
-    └── espn/
-        ├── espn_config.py
-        ├── espn_scrapper.py
-        ├── espn_scrapper_api.py
-        └── espn_scrapper_html.py
-```
 
-## 🚀 Features
+- **PostgreSQL** is the single source of truth: `competitions`, **`teams`** (one row per club, globally unique `name`), **`team_competitions`** (many-to-many with optional `season` and exactly one `is_primary` row per team), and **`matches`**, all in schema **`footballfan`** (not `public`).
+- **Scrappers** (`scrappers/`) fetch fixtures, normalize them, and **upsert** rows keyed by `(source, external_match_id)` so re-runs do not duplicate matches.
+- **API** (`api/`) exposes read-only REST endpoints; it does not scrape. SQL migrations run **on API startup** (embedded in the binary).
 
-- **REST API**: FastAPI-based web service with automatic OpenAPI documentation
-- **Match Scraping**: Fetches football match data from ESPN using both API and HTML scraping
-- **Multi-Team Support**: Supports 20 Brazilian football teams with enum-based validation
-- **Dual Scraping Strategy**: Uses ESPN API as primary method with HTML scraping as fallback
-- **Redis Caching**: Built-in caching with Redis backend for improved performance
-- **Docker Support**: Containerized application with Docker Compose
-- **Health Checks**: Built-in health monitoring endpoints
-- **CORS Support**: Configurable Cross-Origin Resource Sharing
-- **Structured Logging**: Comprehensive logging with file rotation
-- **Development Tools**: Justfile with convenient commands for linting, Docker operations, and development
-- **Application Lifespan Management**: Proper startup and shutdown handling with Redis connection management
+Data flow: scrapers populate `matches` on a schedule; the API serves `GET /teams`, `GET /teams/{teamId}`, and `GET /teams/{teamId}/matches` for date-bounded queries.
 
-## 🛠️ Technology Stack
+## Design choices
 
-- **Framework**: FastAPI
-- **Python Version**: 3.12+
-- **Web Server**: Uvicorn
-- **Data Validation**: Pydantic
-- **Web Scraping**: Requests + BeautifulSoup4
-- **Caching**: Redis with FastAPI-Cache2
-- **Containerization**: Docker + Docker Compose
-- **Package Management**: UV
-- **Database**: PostgreSQL (configured but not actively used)
-- **Cache Backend**: Redis
+| Area | Choice |
+|------|--------|
+| API runtime | Go standard library `net/http`, Go 1.22 `ServeMux` with path patterns |
+| Database access | `pgx/v5` connection pool |
+| Migrations | Embedded SQL under `api/internal/migrate/sql/`, applied in lexical order into schema `footballfan`; versions recorded in `footballfan.schema_migrations` |
+| Scrapers | `httpx`, BeautifulSoup/lxml, `psycopg` for upserts, APScheduler; dependencies managed with **uv** (`pyproject.toml` + `uv.lock`) |
+| Competitions (MVP) | SQL seed is **competition catalog only**; **clubs** are created by scrapers (`teams` + `team_competitions`) from ESPN/Soccerway fixtures — no hardcoded team list in migrations |
+| Team ↔ competition | `team_competitions(team_id, competition_id, season, is_primary)`; Série A/B links **take priority** as `is_primary` when scraped; `GET /teams` picks primary row, or any linked competition if none |
 
-## 📋 Prerequisites
+## Repository layout
 
-- Python 3.12+
-- Docker & Docker Compose (for containerized deployment)
-- Redis server (for caching)
-- UV package manager
-- Just (optional, for development commands)
+| Path | Role |
+|------|------|
+| `api/` | Go HTTP server, migrations, Dockerfile |
+| `scrappers/` | Python package `football_scrapers`, `uv.lock`, Dockerfile |
+| `docker-compose.yaml` | Postgres + pgAdmin + API + scraper |
+| `Justfile` | Shortcuts for local Docker Compose (`just up`, `just logs`, …) |
+| `.env.example` | Template for optional Compose/runtime variables (copy to `.env`; never commit secrets) |
 
-## 🚀 Quick Start
+## Local PostgreSQL setup
 
-### Using Docker (Recommended)
+Use this when the API or scrapers run on your machine and Postgres is installed locally (or reachable on the LAN).
 
-1. **Clone the repository**
+1. **Create a role and database** (adjust names/passwords to your policy). With `psql` as a superuser:
+
    ```bash
-   git clone <repository-url>
-   cd football-fan-ai-agent
+   psql -U postgres -c "CREATE USER football WITH PASSWORD 'football';"
+   psql -U postgres -c "CREATE DATABASE football OWNER football;"
    ```
 
-2. **Run with Docker Compose**
+   Alternatively, if your OS user is already a Postgres superuser:
+
    ```bash
-   # Using Docker Compose directly
-   docker-compose up --build
-   
-   # Or using Justfile commands
-   just run
+   createdb football
    ```
 
-3. **Access the API**
-   - API Base URL: `http://localhost:3002/football-fan`
-   - Health Check: `http://localhost:3002/football-fan/up`
-   - API Documentation: `http://localhost:3002/football-fan/docs`
-   - **Available Servers**:
-     - HomePi: `http://api.homepi.net/football-fan`
-     - Local: `http://localhost:3002`
+   Then set `DATABASE_URL` to match your user and no password, for example `postgres://YOUR_USER@localhost:5432/football?sslmode=disable`.
 
-### Local Development
+2. **Verify connectivity:**
 
-1. **Install dependencies**
    ```bash
-   uv sync
+   psql "$DATABASE_URL" -c "SELECT 1"
    ```
 
-2. **Run the application**
-   ```bash
-   uv run fastapi run src/main.py --port 3000 --host 0.0.0.0
-   ```
+3. **Configure the app:** copy the example env files and point them at this database (see [.env.example](.env.example), [api/.env.example](api/.env.example), [scrappers/.env.example](scrappers/.env.example)).
 
-3. **Access the API**
-   - API Base URL: `http://localhost:3000/football-fan`
-   - Health Check: `http://localhost:3000/football-fan/up`
-   - API Documentation: `http://localhost:3000/football-fan/docs`
-   - **Available Servers**:
-     - HomePi: `http://api.homepi.net/football-fan`
-     - Local: `http://localhost:3002`
+4. **Apply migrations** by starting the API once (`go run ./cmd/server` from `api/` with `DATABASE_URL` set). That creates schema `footballfan`, tables `competitions`, `teams`, `team_competitions`, and `matches`, plus seed data.
 
-## 📚 API Endpoints
+5. **Run the scrapers** after migrations exist; they populate `teams`, `team_competitions`, and `matches`. From `scrappers/`, use `uv sync` then `uv run python -m football_scrapers` (see [scrappers/README.md](scrappers/README.md)). Until a scrape succeeds, `GET /teams` may be empty.
 
-### Health Check
-```http
-GET /football-fan/up
-```
-Returns the application status.
+Inside Docker Compose, services talk to the `postgres` hostname, not `localhost`. The compose file sets `DATABASE_URL` for containers; use `.env` at the repo root only for optional overrides such as `SCRAPER_INTERVAL_HOURS` or `LOG_LEVEL` (see [.env.example](.env.example)).
 
-**Response:**
-```json
-{
-  "status": "ok"
-}
-```
+## How to run the whole project (Docker)
 
-### Get Upcoming Matches
-```http
-GET /football-fan/api/v1/matches/{team_name}/upcoming
-```
+From the repository root. Prefer **[just](https://github.com/casey/just)** recipes (see [Justfile](Justfile)); they run `docker compose -f docker-compose.yaml` for you.
 
-Fetches upcoming matches for a specific team. **Results are cached for 24 hours** to improve performance.
+### `just` commands
 
-**Parameters:**
-- `team_name` (enum): Name of the team (supports 20 Brazilian teams including FLAMENGO, PALMEIRAS, CORINTHIANS, etc.)
+Run `just` or `just --list` to see all recipes. Common ones:
 
-**Cache Information:**
-- **Cache Duration**: 24 hours (86400 seconds)
-- **Cache Backend**: Redis
-- **Cache Key**: `fastapi-cache:matches:{team_name}:upcoming`
+| Command | Description |
+|---------|-------------|
+| `just up` | Start all services **detached** (`docker compose up -d`). Extra args pass through (e.g. `just up --build`). |
+| `just down` | Stop and remove containers; **keeps** Postgres/pgAdmin volumes. |
+| `just down-volumes` | Like `down` but **removes volumes** (wipes the database — use only when you want a clean slate). |
+| `just build` | Build images without starting. |
+| `just rebuild` | `docker compose build --no-cache` then `up -d`. |
+| `just start` / `just stop` | Start or stop existing containers without removing them. |
+| `just restart-services` | `docker compose restart` — optional service names, e.g. `just restart-services api`. |
+| `just restart` | **Destructive dev reset:** drops schema `footballfan` (all app data + migration history in that schema), rebuilds **api** and **scraper** images with `--no-cache`, then recreates those containers so migrations run again. Requires a running Postgres (starts the stack first). |
+| `just logs` | Follow logs (optionally: `just logs api scraper`). |
+| `just logs-tail` | Last 200 log lines, no follow. |
+| `just ps` | `docker compose ps -a`. |
+| `just db-shell` | `psql` inside the `postgres` container (`football` / `football`). Query app tables with the `footballfan` schema prefix (e.g. `footballfan.matches`). |
+| `just shell` | Shell in a container (default `api`), e.g. `just shell scraper`. |
 
-**Response:**
-```json
-[
-  {
-    "date": "2025-01-15T20:00:00Z",
-    "date_detail": "8:00 PM",
-    "completed": false,
-    "competition": "Campeonato Brasileiro Série A",
-    "home_team": {
-      "abbrev": "FLA",
-      "display_name": "Flamengo",
-      "link": "https://www.espn.com/soccer/team/_/id/819/flamengo",
-      "logo": "https://a.espncdn.com/combiner/i?img=/i/teamlogos/soccer/500/819.png"
-    },
-    "away_team": {
-      "abbrev": "BOT",
-      "display_name": "Botafogo",
-      "link": "https://www.espn.com/soccer/team/_/id/819/botafogo",
-      "logo": "https://a.espncdn.com/combiner/i?img=/i/teamlogos/soccer/500/819.png"
-    },
-    "stadium": "Maracanã Stadium",
-    "link": "https://www.espn.com/soccer/match/_/id/123456"
-  }
-]
-```
+### What Compose starts
 
-## 🔧 Configuration
+- **postgres** — database `football`, user/password `football` (see [docker-compose.yaml](docker-compose.yaml)), port `5432` on the host
+- **pgadmin** — web UI for Postgres at `http://localhost:5050` (default login `admin@example.com` / `admin`; override with `PGADMIN_DEFAULT_EMAIL`, `PGADMIN_DEFAULT_PASSWORD`, `PGADMIN_PORT` in `.env`). In pgAdmin, register a server with host **`postgres`**, port **5432**, username **`football`**, password **`football`**, database **`football`**.
+- **api** — HTTP on `http://localhost:8080`
+- **scraper** — runs one scrape on startup, then on the configured interval (default 24 hours)
 
-The application uses Pydantic Settings for configuration management. Key settings include:
+Wait until Postgres is healthy; the API applies migrations on first start.
 
-### Application Settings
-- **Name**: football-fan
-- **Version**: 0.0.1
-- **Root Path**: /football-fan
+### Without `just`
 
-### API Settings
-- **Version**: v1
-- **Path**: /api/v1
-
-### Server Settings
-- **HTTP Port**: 3000 (3002 in Docker)
-
-### CORS Settings
-- **Allow Origins**: * (all origins)
-- **Allow Credentials**: true
-- **Allow Methods**: GET, POST, PUT, DELETE, OPTIONS
-
-### Logger Settings
-- **Level**: TRACE
-- **File**: app.log
-- **Max Bytes**: 1MB
-- **Backup Count**: 5
-
-## 🏗️ Scraping Strategy
-
-The application uses a dual scraping approach with **HTML scraping as the primary method**:
-
-### 1. HTML Scraping (Primary)
-- **Endpoint**: `https://www.espn.com/soccer/team/fixtures/_/id/{team_id}/{team_name}`
-- **Method**: Web scraping with BeautifulSoup + JSON extraction
-- **Advantages**: More comprehensive data, includes team logos and links
-- **Implementation**: `EspnScrapperHTML`
-
-### 2. ESPN API (Fallback)
-- **Endpoint**: `https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/teams/{team_id}/schedule`
-- **Method**: Direct API calls
-- **Advantages**: Fast, reliable, structured data
-- **Implementation**: `EspnScrapperApi`
-
-### Team Configuration
-- **Dynamic URLs**: Team-specific URLs generated using team IDs from `EspnConfig`
-- **Team IDs**: 20 Brazilian teams with unique ESPN team identifiers
-- **Flexible Support**: Easy to add new teams by updating the configuration
-
-## 🐳 Docker Configuration
-
-### Dockerfile
-- **Base Image**: Python 3.12-slim
-- **Package Manager**: UV
-- **Port**: 3000
-- **Workers**: 4
-
-### Docker Compose
-- **Service Name**: football-fan-api
-- **External Port**: 3002
-- **Health Check**: HTTP GET /up
-- **Environment**: production
-- **External Dependencies**: PostgreSQL and Redis (configured to connect to 192.168.1.100)
-
-## 📊 Monitoring
-
-### Health Checks
-The application includes built-in health monitoring:
-- **Endpoint**: `/up`
-- **Method**: GET
-- **Response**: JSON with status
-- **Docker Health Check**: Configured in docker-compose.yaml
-
-### Logging
-- **File**: app.log
-- **Level**: TRACE
-- **Rotation**: 1MB files, 5 backups
-- **Format**: Structured with timestamps and process info
-
-## ⚡ Performance & Caching
-
-### Redis Caching
-The application implements intelligent caching to improve performance:
-
-- **Cache Backend**: Redis
-- **Cache Duration**: 24 hours for match data
-- **Cache Key Pattern**: `fastapi-cache:matches:{team_name}:upcoming`
-- **Automatic Invalidation**: Cache expires after 24 hours
-- **Connection Management**: Proper Redis connection lifecycle with application lifespan
-
-### Performance Benefits
-- **Reduced API Calls**: Cached responses reduce external ESPN API calls
-- **Faster Response Times**: Cached data serves instantly
-- **Reduced Server Load**: Less processing for repeated requests
-- **Better User Experience**: Quicker response times for end users
-
-### Cache Configuration
-```python
-# Cache settings in settings.py
-redis:
-  host: localhost
-  port: 6379
-  password: redis
-  database: 0
-```
-
-## 🔍 Development
-
-### Development Commands (Justfile)
-The project includes a `Justfile` with convenient development commands:
+Equivalent examples from the repo root:
 
 ```bash
-# Show all available commands
-just help
-
-# Run all linters with auto-fix
-just lint-fix
-
-# Run individual linters
-just lint-ruff-fix
-just lint-black-fix
-just lint-isort-fix
-
-# Run all linters (check only)
-just lint
-
-# Docker operations
-just build          # Build Docker image
-just run            # Run with Docker Compose
-just status         # Check container status
-just logs           # Show container logs
-just stop           # Stop all containers
+docker compose up --build          # foreground; Ctrl+C stops containers
+docker compose up -d --build       # detached (same idea as `just up --build`)
 ```
 
-### Code Quality Tools
-- **Black**: Code formatting
-- **Flake8**: Linting
-- **Pylint**: Advanced linting
-- **Ruff**: Fast linting
-- **isort**: Import sorting
-
-### Manual Commands
-```bash
-# Format code
-uv run black src/
-
-# Lint code
-uv run flake8 src/
-
-# Type checking
-uv run pylint src/
-```
-
-## 🌐 Supported Teams
-
-The application now supports **20 Brazilian football teams** from Serie A and other competitions:
-
-### Serie A Teams
-- **Flamengo** (Team ID: 819)
-- **Palmeiras** (Team ID: 2029)
-- **Cruzeiro** (Team ID: 2022)
-- **Bahia** (Team ID: 9967)
-- **Botafogo** (Team ID: 6086)
-- **São Paulo** (Team ID: 2026)
-- **Bragantino** (Team ID: 6079)
-- **Corinthians** (Team ID: 874)
-- **Fluminense** (Team ID: 3445)
-- **Internacional** (Team ID: 1936)
-- **Ceará** (Team ID: 9969)
-- **Grêmio** (Team ID: 6273)
-- **Atlético-MG** (Team ID: 7632)
-- **Vasco** (Team ID: 3454)
-- **Santos** (Team ID: 2674)
-- **Vitória** (Team ID: 3457)
-- **Juventude** (Team ID: 6270)
-- **Fortaleza** (Team ID: 6272)
-- **Sport** (Team ID: 7631)
-- **Mirassol** (Team ID: 9169)
-
-### Team Validation
-The API now uses **enum-based team validation** through the `Team` enum in `src/models/matches_request.py`, ensuring only valid team names are accepted.
-
-**Example API calls:**
-```bash
-# Valid team names
-GET /football-fan/api/v1/matches/FLAMENGO/upcoming
-GET /football-fan/api/v1/matches/PALMEIRAS/upcoming
-GET /football-fan/api/v1/matches/CORINTHIANS/upcoming
-
-# Invalid team names will return validation errors
-GET /football-fan/api/v1/matches/INVALID_TEAM/upcoming
-```
-
-## 🔧 Environment Variables
-
-The application supports the following environment variables:
+Try the API:
 
 ```bash
-# Environment
-PY_ENV=production
-
-# Database
-POSTGRES__HOST=localhost
-POSTGRES__PORT=5432
-POSTGRES__DATABASE_NAME=postgres
-POSTGRES__USERNAME=postgres
-POSTGRES__PASSWORD=postgres
-
-# Redis Cache
-REDIS__HOST=localhost
-REDIS__PORT=6379
-REDIS__PASSWORD=redis
-REDIS__DATABASE=0
-
-# CORS
-CORS__ALLOW_ORIGINS=["*"]
-CORS__ALLOW_CREDENTIALS=true
+curl -s http://localhost:8080/healthz
+curl -s http://localhost:8080/teams
 ```
 
-## 📝 License
+Optional: copy [.env.example](.env.example) to `.env` in the repo root to set `SCRAPER_INTERVAL_HOURS`, `SCRAPER_CRON`, or `LOG_LEVEL` for the scraper service (Compose substitutes these into [docker-compose.yaml](docker-compose.yaml)). For API and scraper env when running on the host, see [api/.env.example](api/.env.example) and [scrappers/.env.example](scrappers/.env.example).
 
-This project is part of the Football Fan AI Agent system.
+## Continuous integration
 
-## 🤝 Contributing
+[GitHub Actions](.github/workflows/ci.yml) runs on pushes and pull requests to `main` / `master`: Go tests (`api/`), Python tests (`scrappers/`), and Docker builds for the API and scraper images.
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests and linting
-5. Submit a pull request
+## Documentation
 
-## 📞 Support
+- [api/README.md](api/README.md) — environment variables, endpoints, and API behavior
+- [scrappers/README.md](scrappers/README.md) — running scrapers, sources, scheduling, and matching rules
 
-For issues and questions, please create an issue in the repository.
+## Ethical scraping
+
+Scrapers should respect site terms of use, use a identifiable `User-Agent` (configurable), throttle requests, and avoid hammering endpoints. This project is intended for personal or research use; production use may require official data licenses.

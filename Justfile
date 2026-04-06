@@ -1,64 +1,67 @@
-# Football Fan AI Agent Justfile
-# Provides convenient commands for development, Docker operations, and Google Calendar integration
+# Local development via Docker Compose only (from repo root).
+# Usage: `just` lists recipes; `just up`, `just restart api`, etc.
 
-# Default target - show help
-default:
-    @just help
+compose := "docker compose -f docker-compose.yaml"
 
-# Development & Linting Commands
-lint-fix:
-    @echo "Running linters with auto-fix..."
-    @just lint-ruff-fix
-    @just lint-black-fix
-    @just lint-isort-fix
-    @echo "All linters fixed successfully."
+# Start all services in the background (build images if missing).
+up *args:
+    {{compose}} up -d {{args}}
 
-lint-ruff-fix:
-    uv run ruff check --fix
+# Stop and remove containers (keeps named volumes e.g. postgres data).
+down *args:
+    {{compose}} down {{args}}
 
-lint-black-fix:
-    uv run black . --exclude venv
-    @echo "Black formatting applied."
+# Stop and remove containers, networks, and volumes (wipes DB — confirm first).
+down-volumes:
+    {{compose}} down -v
 
-lint-isort-fix:
-    uv run isort .
+# Build (or rebuild) images without starting.
+build *args:
+    {{compose}} build {{args}}
 
-lint: lint-ruff lint-flake8 lint-pylint lint-black
-    @echo "All linters passed successfully."
+# Rebuild images (no cache) and start the stack detached.
+rebuild:
+    {{compose}} build --no-cache
+    {{compose}} up -d
 
-lint-ruff:
-    uv run ruff check
+# Start existing stopped containers (after `down` without `-v`, or `stop`).
+start *args:
+    {{compose}} start {{args}}
 
-lint-flake8:
-    uv run flake8
+# Stop running containers without removing them.
+stop *args:
+    {{compose}} stop {{args}}
 
-lint-pylint:
-    uv run pylint .
+# Docker Compose restart only (no image rebuild). Optional service names.
+restart-services *args:
+    {{compose}} restart {{args}}
 
-lint-black:
-    uv run black --check
+# Drop app schema footballfan (all data + migration history there), rebuild api + scraper images, recreate those containers.
+restart:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{compose}} up -d
+    {{compose}} exec -T postgres sh -c 'until pg_isready -U football -d football; do sleep 1; done'
+    {{compose}} exec -T postgres psql -U football -d football -v ON_ERROR_STOP=1 -c 'DROP SCHEMA IF EXISTS footballfan CASCADE;'
+    {{compose}} build --no-cache api scraper
+    {{compose}} up -d --force-recreate api scraper
 
-# Docker Operations
-build:
-    @echo "Building Docker image..."
-    docker compose build
-    @echo "Build completed successfully!"
+# Follow logs (all services). Pass names to scope: `just logs api scraper`.
+logs *args:
+    {{compose}} logs -f {{args}}
 
-run:
-    @echo "Running default service (help)..."
-    docker compose up --build
+# One-shot log tail without follow.
+logs-tail *args:
+    {{compose}} logs --tail 200 {{args}}
 
-# Management Commands
-status:
-    @echo "Status of all services:"
-    @docker compose ps
+# Container status.
+ps:
+    {{compose}} ps -a
 
-logs:
-    @echo "Showing logs for all services..."
-    docker compose logs -f
+# Open psql in the Postgres container.
+db-shell:
+    {{compose}} exec postgres psql -U football -d football
 
-stop:
-    @echo "Stopping all containers..."
-    docker compose down
-    @echo "All containers stopped!"
-
+# Run a shell inside a service container (default: api). Example: `just shell scraper`.
+shell service="api":
+    {{compose}} exec -it {{service}} /bin/sh
