@@ -1,0 +1,3 @@
+ignored:
+  # Pinning every Alpine package revision is brittle for a small static binary image.
+  - DL3018

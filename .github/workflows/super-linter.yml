@@ -1,5 +1,8 @@
 name: Super-Linter
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main, master]
@@ -21,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -32,17 +35,23 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Diff-only (vs base branch on PRs, vs previous commit on push)
           VALIDATE_ALL_CODEBASE: false
-          # Editor/agent docs are not application source
-          FILTER_REGEX_EXCLUDE: .*(/\.agents/|/\.cursor/).*
+          # Match `.agents/...` at repo root (not only `.../.agents/...`)
+          FILTER_REGEX_EXCLUDE: .*(\.agents/|\.cursor/|skills-lock\.json).*
           # Hand-written Postgres migrations; dialect-specific SQL is noisy for sqlfluff without config
-          VALIDATE_SQL: false
+          VALIDATE_SQLFLUFF: false
           # Test fixtures intentionally repeat similar HTML/text
           VALIDATE_JSCPD: false
           # No commitlint config in repo
           VALIDATE_GIT_COMMITLINT: false
+          # golangci-lint on per-file Go paths fails; module-level lint runs in Go job
+          VALIDATE_GO: false
+          # Requires pinning every action to SHA; actionlint still validates workflows
+          VALIDATE_GITHUB_ACTIONS_ZIZMOR: false
           # Avoid noisy duplicate / conflicting Python tools; Ruff covers style + lint
           VALIDATE_PYTHON_PYLINT: false
           VALIDATE_PYTHON_FLAKE8: false
           VALIDATE_PYTHON_ISORT: false
           VALIDATE_PYTHON_BLACK: false
           VALIDATE_PYTHON_MYPY: false
+          # Prose linting is noisy on technical READMEs
+          VALIDATE_NATURAL_LANGUAGE: false

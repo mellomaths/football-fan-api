@@ -71,14 +71,18 @@ func Up(ctx context.Context, pool *pgxpool.Pool) error {
 			return fmt.Errorf("begin %s: %w", name, err)
 		}
 		if _, err := tx.Exec(ctx, string(body)); err != nil {
-			_ = tx.Rollback(ctx)
+			if rbErr := tx.Rollback(ctx); rbErr != nil {
+				return fmt.Errorf("exec migration %s: %w (rollback: %v)", version, err, rbErr)
+			}
 			return fmt.Errorf("exec migration %s: %w", version, err)
 		}
 		if _, err := tx.Exec(ctx, fmt.Sprintf(
 			`INSERT INTO %s.schema_migrations (version) VALUES ($1)`,
 			db.AppSchema,
 		), version); err != nil {
-			_ = tx.Rollback(ctx)
+			if rbErr := tx.Rollback(ctx); rbErr != nil {
+				return fmt.Errorf("record migration %s: %w (rollback: %v)", name, err, rbErr)
+			}
 			return fmt.Errorf("record migration %s: %w", name, err)
 		}
 		if err := tx.Commit(ctx); err != nil {

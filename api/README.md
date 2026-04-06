@@ -6,10 +6,10 @@ HTTP API that reads **teams** and **scheduled matches** from PostgreSQL. The ser
 
 ### Environment variables
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `DATABASE_URL` | Yes | — | PostgreSQL URL (e.g. `postgres://user:pass@host:5432/dbname?sslmode=disable`) |
-| `HTTP_ADDR` | No | `:8080` | Listen address (`host:port` or `:port`) |
+| Variable       | Required | Default | Description                                                                 |
+| -------------- | -------- | ------- | --------------------------------------------------------------------------- |
+| `DATABASE_URL` | Yes      | —       | PostgreSQL URL (for example `postgres://user:pass@host:5432/dbname?sslmode=disable`) |
+| `HTTP_ADDR`    | No       | `:8080` | Listen address (`host:port` or `:port`)                                     |
 
 Copy [.env.example](.env.example) to `.env` in this directory, edit `DATABASE_URL`, then load it in your shell before running:
 
@@ -134,13 +134,13 @@ On startup, the binary ensures schema `footballfan` exists, creates `footballfan
 
 ### Project layout (API)
 
-| Path | Purpose |
-|------|---------|
-| `cmd/server/main.go` | Entry: config, pool, migrate, HTTP server, graceful shutdown |
-| `internal/httpapi/` | Handlers and mux |
-| `internal/db/` | Queries and JSON DTOs |
-| `internal/validate/` | Date-range validation for matches |
-| `internal/migrate/` | Embedded SQL migrations |
+| Path                   | Purpose                                                         |
+| ---------------------- | --------------------------------------------------------------- |
+| `cmd/server/main.go`   | Entry: config, pool, migrate, HTTP server, graceful shutdown    |
+| `internal/httpapi/`    | Handlers and mux                                                |
+| `internal/db/`         | Queries and JSON DTOs                                           |
+| `internal/validate/`   | Date-range validation for matches                               |
+| `internal/migrate/`    | Embedded SQL migrations                                         |
 
 ### Tests
 

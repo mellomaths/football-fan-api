@@ -1,4 +1,4 @@
-FROM golang:1.22-alpine AS build
+FROM golang:1.24-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -10,5 +10,7 @@ RUN apk add --no-cache ca-certificates
 COPY --from=build /out/server /server
 ENV HTTP_ADDR=:8080
 EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1
 USER nobody
 ENTRYPOINT ["/server"]

@@ -4,7 +4,7 @@ This repository contains a small system for **scheduled Brazilian football fixtu
 
 ## Requirements
 
-- **Go** 1.22+ (for local API development)
+- **Go** 1.24+ (for local API development; matches `api/go.mod` and the API Docker image)
 - **Python** 3.11+ and **[uv](https://docs.astral.sh/uv/)** (for local scraper development and lockfile management)
 - **PostgreSQL** 14+ (16 used in Docker)
 - **Docker** and **Docker Compose** (recommended for running everything together)

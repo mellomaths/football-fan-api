@@ -41,7 +41,9 @@ class Storage:
                 FROM {} t
                 JOIN {} tc ON tc.team_id = t.id
                 JOIN {} c ON c.id = tc.competition_id
-                """).format(table("teams"), table("team_competitions"), table("competitions"))
+                """).format(
+                    table("teams"), table("team_competitions"), table("competitions")
+                )
             )
             for row in cur.fetchall():
                 assert isinstance(row, dict)
@@ -153,13 +155,19 @@ _DOMESTIC_LEAGUES = frozenset({"BRASILEIRAO_A", "BRASILEIRAO_B"})
 
 
 def link_team_competition(
-    conn: psycopg.Connection, team_id: int, competition_id: int, *, competition_code: str
+    conn: psycopg.Connection,
+    team_id: int,
+    competition_id: int,
+    *,
+    competition_code: str,
 ) -> None:
     """Ensure team_id is linked to competition_id; set is_primary per competition tier."""
     if competition_code in _DOMESTIC_LEAGUES:
         with conn.cursor() as cur:
             cur.execute(
-                sql.SQL("UPDATE {} SET is_primary = false WHERE team_id = %s").format(table("team_competitions")),
+                sql.SQL("UPDATE {} SET is_primary = false WHERE team_id = %s").format(
+                    table("team_competitions")
+                ),
                 (team_id,),
             )
             cur.execute(
@@ -173,7 +181,9 @@ def link_team_competition(
         return
     with conn.cursor() as cur:
         cur.execute(
-            sql.SQL("SELECT COUNT(*)::int AS n FROM {} WHERE team_id = %s").format(table("team_competitions")),
+            sql.SQL("SELECT COUNT(*)::int AS n FROM {} WHERE team_id = %s").format(
+                table("team_competitions")
+            ),
             (team_id,),
         )
         row = cur.fetchone()
@@ -189,7 +199,9 @@ def link_team_competition(
         )
 
 
-def register_team(lookup: TeamLookup, competition_code: str, name: str, team_id: int) -> None:
+def register_team(
+    lookup: TeamLookup, competition_code: str, name: str, team_id: int
+) -> None:
     """Add a team id to lookup maps (e.g. after INSERT)."""
     bucket = lookup.by_competition_code.setdefault(competition_code, {})
     bucket[normalize_team_name(name)] = team_id
@@ -223,10 +235,14 @@ def ensure_team_id(
             espn_slug=espn_slug,
             soccerway_id=soccerway_id,
         )
-        link_team_competition(conn, tid, competition_id, competition_code=competition_code)
+        link_team_competition(
+            conn, tid, competition_id, competition_code=competition_code
+        )
         return tid
     if not auto_create:
-        log.warning("unmatched team %r for competition %s", display_name, competition_code)
+        log.warning(
+            "unmatched team %r for competition %s", display_name, competition_code
+        )
         return None
     name = display_name.strip()
     if not name:
@@ -258,13 +274,17 @@ def ensure_team_id(
             log.error("could not upsert team %r", name)
             return None
         new_id = int(row["id"])
-    link_team_competition(conn, new_id, competition_id, competition_code=competition_code)
+    link_team_competition(
+        conn, new_id, competition_id, competition_code=competition_code
+    )
     register_team(lookup, competition_code, name, new_id)
     log.info("created team %r id=%s for competition %s", name, new_id, competition_code)
     return new_id
 
 
-def competition_id_for_code(conn: psycopg.Connection, competition_code: str) -> int | None:
+def competition_id_for_code(
+    conn: psycopg.Connection, competition_code: str
+) -> int | None:
     with conn.cursor() as cur:
         cur.execute(
             sql.SQL("SELECT id FROM {} WHERE code = %s").format(table("competitions")),

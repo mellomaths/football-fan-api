@@ -94,7 +94,9 @@ def parse_fixtures_html(html: str, competition_code: str) -> list[dict]:
             parts = link["href"].strip("/").split("/")
             if len(parts) >= 2:
                 mid = parts[-1]
-        ext = f"{competition_code}:{mid or f'{home}-{away}-{kickoff.date().isoformat()}'}"
+        ext = (
+            f"{competition_code}:{mid or f'{home}-{away}-{kickoff.date().isoformat()}'}"
+        )
         out.append(
             {
                 "external_match_id": ext[:256],
@@ -109,7 +111,9 @@ def parse_fixtures_html(html: str, competition_code: str) -> list[dict]:
     return out
 
 
-def scrape_soccerway(storage: Storage, conn: psycopg.Connection, client: httpx.Client) -> int:
+def scrape_soccerway(
+    storage: Storage, conn: psycopg.Connection, client: httpx.Client
+) -> int:
     """Fetch Soccerway HTML fixtures pages and upsert matches."""
     teams = storage.load_teams(conn)
     inserted = 0

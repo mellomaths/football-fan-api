@@ -45,11 +45,15 @@ def main() -> None:
     cron = os.environ.get("SCRAPER_CRON", "").strip()
     hours_raw = os.environ.get("SCRAPER_INTERVAL_HOURS", "").strip()
     if cron:
-        trigger: CronTrigger | IntervalTrigger = CronTrigger.from_crontab(cron, timezone="UTC")
+        trigger: CronTrigger | IntervalTrigger = CronTrigger.from_crontab(
+            cron, timezone="UTC"
+        )
         logging.getLogger(__name__).info("scheduler using SCRAPER_CRON=%r (UTC)", cron)
     elif hours_raw:
         trigger = IntervalTrigger(hours=int(hours_raw))
-        logging.getLogger(__name__).info("scheduler using SCRAPER_INTERVAL_HOURS=%s", hours_raw)
+        logging.getLogger(__name__).info(
+            "scheduler using SCRAPER_INTERVAL_HOURS=%s", hours_raw
+        )
     else:
         trigger = IntervalTrigger(hours=24)
         logging.getLogger(__name__).info("scheduler default interval 24h (UTC)")

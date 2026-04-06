@@ -39,48 +39,48 @@ uv sync
 
 #### Required
 
-| Variable | Description |
-|----------|-------------|
+| Variable       | Description                                    |
+| -------------- | ---------------------------------------------- |
 | `DATABASE_URL` | PostgreSQL connection string (same as the API) |
 
 #### Scheduling (after the first run)
 
 The process **always runs one full scrape immediately**, then starts the scheduler.
 
-| Variable | Description |
-|----------|-------------|
-| `SCRAPER_CRON` | If set (non-empty), **wins** over interval. Standard **5-field cron** in **UTC**, e.g. `0 3 * * *` for 03:00 UTC daily. |
-| `SCRAPER_INTERVAL_HOURS` | If `SCRAPER_CRON` is unset, repeat every this many hours (integer). |
-| *(default)* | If neither is set, repeats every **24** hours. |
+| Variable                 | Description                                                                                                                                 |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SCRAPER_CRON`           | If set (non-empty), **wins** over interval. Standard **5-field cron** in **UTC**, e.g. `0 3 * * *` for 03:00 UTC daily.                     |
+| `SCRAPER_INTERVAL_HOURS` | If `SCRAPER_CRON` is unset, repeat every this many hours (integer).                                                                       |
+| *(default)*              | If neither is set, repeats every **24** hours.                                                                                            |
 
 #### General
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LOG_LEVEL` | `INFO` | Python logging level name (`DEBUG`, `INFO`, …) |
-| `SCRAPER_BETWEEN_SOURCES_SEC` | `2` | Pause between ESPN and Soccerway passes |
+| Variable                      | Default | Description                                      |
+| ----------------------------- | ------- | ------------------------------------------------ |
+| `LOG_LEVEL`                   | `INFO`  | Python logging level name (`DEBUG`, `INFO`, …)   |
+| `SCRAPER_BETWEEN_SOURCES_SEC` | `2`     | Pause between ESPN and Soccerway passes          |
 
 #### HTTP client
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SCRAPER_USER_AGENT` | project default string | `User-Agent` header for outbound HTTP |
-| `SCRAPER_HTTP_TIMEOUT_SEC` | `30` | Request timeout in seconds |
+| Variable                   | Default                  | Description                           |
+| -------------------------- | ------------------------ | ------------------------------------- |
+| `SCRAPER_USER_AGENT`       | project default string   | `User-Agent` header for outbound HTTP |
+| `SCRAPER_HTTP_TIMEOUT_SEC` | `30`                     | Request timeout in seconds            |
 
 #### ESPN (`espn` module)
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SCRAPER_HORIZON_DAYS` | `45` | How far ahead from today to request scoreboard windows |
-| `SCRAPER_ESPN_DATE_CHUNK_DAYS` | `7` | Each API call covers this many days (batched range) |
-| `SCRAPER_ESPN_SLEEP_SEC` | `0.25` | Delay after each chunk to reduce request rate |
+| Variable                       | Default | Description                                            |
+| ------------------------------ | ------- | ------------------------------------------------------ |
+| `SCRAPER_HORIZON_DAYS`         | `45`    | How far ahead from today to request scoreboard windows |
+| `SCRAPER_ESPN_DATE_CHUNK_DAYS` | `7`     | Each API call covers this many days (batched range)    |
+| `SCRAPER_ESPN_SLEEP_SEC`       | `0.25`  | Delay after each chunk to reduce request rate          |
 
 ESPN path segments (e.g. `bra.1`, `bra.2`, `conmebol.libertadores`, `conmebol.sudamericana`, `bra.copa`) are mapped in code to internal **competition codes** (`BRASILEIRAO_A`, `COPA_LIBERTADORES`, …). Adjust mappings in `espn.py` if ESPN changes URLs or you add competitions.
 
 #### Soccerway (`soccerway` module)
 
-| Variable | Description |
-|----------|-------------|
+| Variable                      | Description                                 |
+| ----------------------------- | ------------------------------------------- |
 | `SOCCERWAY_URL_BRASILEIRAO_A` | Override default fixtures URL for Série A |
 | `SOCCERWAY_URL_BRASILEIRAO_B` | Override default fixtures URL for Série B |
 
@@ -135,13 +135,13 @@ Parser tests use **saved HTML fixtures** under `tests/fixtures/` (no network in 
 
 ### Package layout
 
-| Location | Role |
-|----------|------|
-| `pyproject.toml` | Project metadata and dependencies |
-| `uv.lock` | Locked versions (commit this file) |
-| `src/football_scrapers/espn.py` | ESPN JSON integration |
-| `src/football_scrapers/soccerway.py` | Soccerway HTML parsing |
-| `src/football_scrapers/storage.py` | DB load + match upsert |
+| Location                             | Role                              |
+| ------------------------------------ | --------------------------------- |
+| `pyproject.toml`                     | Project metadata and dependencies |
+| `uv.lock`                            | Locked versions (commit this file) |
+| `src/football_scrapers/espn.py`      | ESPN JSON integration             |
+| `src/football_scrapers/soccerway.py` | Soccerway HTML parsing            |
+| `src/football_scrapers/storage.py`   | DB load + match upsert            |
 | `src/football_scrapers/http_client.py` | Shared client, retries, backoff |
-| `src/football_scrapers/normalize.py` | Name normalization |
-| `src/football_scrapers/__main__.py` | Entry: one run + APScheduler loop |
+| `src/football_scrapers/normalize.py` | Name normalization                |
+| `src/football_scrapers/__main__.py`  | Entry: one run + APScheduler loop |

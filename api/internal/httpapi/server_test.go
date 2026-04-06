@@ -21,14 +21,14 @@ type stubStore struct {
 	err      error
 }
 
-func (s *stubStore) ListTeams(ctx context.Context) ([]db.Team, error) {
+func (s *stubStore) ListTeams(_ context.Context) ([]db.Team, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
 	return s.teams, nil
 }
 
-func (s *stubStore) GetTeamByID(ctx context.Context, teamID int64) (db.TeamDetail, error) {
+func (s *stubStore) GetTeamByID(_ context.Context, teamID int64) (db.TeamDetail, error) {
 	if s.err != nil {
 		return db.TeamDetail{}, s.err
 	}
@@ -38,7 +38,7 @@ func (s *stubStore) GetTeamByID(ctx context.Context, teamID int64) (db.TeamDetai
 	return db.TeamDetail{}, db.ErrTeamNotFound
 }
 
-func (s *stubStore) TeamExists(ctx context.Context, teamID int64) (bool, error) {
+func (s *stubStore) TeamExists(_ context.Context, teamID int64) (bool, error) {
 	if s.err != nil {
 		return false, s.err
 	}
@@ -46,9 +46,9 @@ func (s *stubStore) TeamExists(ctx context.Context, teamID int64) (bool, error) 
 }
 
 func (s *stubStore) ListMatchesForTeam(
-	ctx context.Context,
-	teamID int64,
-	fromInclusive, toExclusive time.Time,
+	_ context.Context,
+	_ int64,
+	_, _ time.Time,
 ) ([]db.Match, error) {
 	if s.err != nil {
 		return nil, s.err
