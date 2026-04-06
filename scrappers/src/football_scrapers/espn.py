@@ -76,9 +76,7 @@ def fetch_scoreboard_json(client: httpx.Client, espn_slug: str, dates: str) -> d
     return resp.json()
 
 
-def scrape_espn(
-    storage: Storage, conn: psycopg.Connection, client: httpx.Client
-) -> int:
+def scrape_espn(storage: Storage, conn: psycopg.Connection, client: httpx.Client) -> int:
     """Fetch upcoming fixtures from ESPN scoreboard API. Returns upsert count."""
     teams = storage.load_teams(conn)
     inserted = 0

@@ -21,6 +21,7 @@ football-scrapers = "football_scrapers.__main__:main"
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
+    "ruff>=0.15.9",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -28,3 +29,7 @@ packages = ["src/football_scrapers"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# Align with Super-Linter PYTHON_RUFF_FORMAT (default line length 120).
+[tool.ruff]
+line-length = 120

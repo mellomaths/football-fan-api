@@ -71,7 +71,7 @@ def parse_fixtures_html(html: str, competition_code: str) -> list[dict]:
     """Best-effort parse of Soccerway fixtures table rows."""
     soup = BeautifulSoup(html, "lxml")
     out: list[dict] = []
-    for tr in soup.select("table.matches__table tbody tr"):
+    for tr in soup.select("table.matches__table tbody tr, table.matches-table tbody tr"):
         tds = tr.find_all("td")
         if len(tds) < 3:
             continue
@@ -94,9 +94,7 @@ def parse_fixtures_html(html: str, competition_code: str) -> list[dict]:
             parts = link["href"].strip("/").split("/")
             if len(parts) >= 2:
                 mid = parts[-1]
-        ext = (
-            f"{competition_code}:{mid or f'{home}-{away}-{kickoff.date().isoformat()}'}"
-        )
+        ext = f"{competition_code}:{mid or f'{home}-{away}-{kickoff.date().isoformat()}'}"
         out.append(
             {
                 "external_match_id": ext[:256],
@@ -111,9 +109,7 @@ def parse_fixtures_html(html: str, competition_code: str) -> list[dict]:
     return out
 
 
-def scrape_soccerway(
-    storage: Storage, conn: psycopg.Connection, client: httpx.Client
-) -> int:
+def scrape_soccerway(storage: Storage, conn: psycopg.Connection, client: httpx.Client) -> int:
     """Fetch Soccerway HTML fixtures pages and upsert matches."""
     teams = storage.load_teams(conn)
     inserted = 0

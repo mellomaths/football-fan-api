@@ -4,9 +4,7 @@ from collections.abc import Callable
 
 import httpx
 
-DEFAULT_UA = (
-    "football-scrapers/0.1 (+https://github.com/mellomaths/football-fan-api; research)"
-)
+DEFAULT_UA = "football-scrapers/0.1 (+https://github.com/mellomaths/football-fan-api; research)"
 
 
 def default_headers() -> dict[str, str]:
@@ -16,9 +14,7 @@ def default_headers() -> dict[str, str]:
 
 def make_client() -> httpx.Client:
     timeout = float(os.environ.get("SCRAPER_HTTP_TIMEOUT_SEC", "30"))
-    return httpx.Client(
-        timeout=timeout, headers=default_headers(), follow_redirects=True
-    )
+    return httpx.Client(timeout=timeout, headers=default_headers(), follow_redirects=True)
 
 
 def with_backoff(

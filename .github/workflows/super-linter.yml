@@ -42,6 +42,8 @@ jobs:
           VALIDATE_BIOME_LINT: false
           # Avoid Prettier vs markdownlint fights on long technical lines
           VALIDATE_MARKDOWN_PRETTIER: false
+          # No repo markdownlint config: default MD013/MD060 are noisy on technical READMEs
+          VALIDATE_MARKDOWN: false
           # Hand-written Postgres migrations; dialect-specific SQL is noisy for sqlfluff without config
           VALIDATE_SQLFLUFF: false
           # Test fixtures intentionally repeat similar HTML/text
