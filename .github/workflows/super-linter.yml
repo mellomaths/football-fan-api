@@ -1,0 +1,48 @@
+name: Super-Linter
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: super-linter-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  super-linter:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: read
+      statuses: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Super-Linter
+        uses: super-linter/super-linter/slim@v8
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Diff-only (vs base branch on PRs, vs previous commit on push)
+          VALIDATE_ALL_CODEBASE: false
+          # Editor/agent docs are not application source
+          FILTER_REGEX_EXCLUDE: .*(/\.agents/|/\.cursor/).*
+          # Hand-written Postgres migrations; dialect-specific SQL is noisy for sqlfluff without config
+          VALIDATE_SQL: false
+          # Test fixtures intentionally repeat similar HTML/text
+          VALIDATE_JSCPD: false
+          # No commitlint config in repo
+          VALIDATE_GIT_COMMITLINT: false
+          # Avoid noisy duplicate / conflicting Python tools; Ruff covers style + lint
+          VALIDATE_PYTHON_PYLINT: false
+          VALIDATE_PYTHON_FLAKE8: false
+          VALIDATE_PYTHON_ISORT: false
+          VALIDATE_PYTHON_BLACK: false
+          VALIDATE_PYTHON_MYPY: false
