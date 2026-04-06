@@ -17,7 +17,7 @@ import (
 // Store is the read model used by HTTP handlers (implemented by *db.Store).
 type Store interface {
 	ListTeams(ctx context.Context) ([]db.Team, error)
-	GetTeamByID(ctx context.Context, teamID int64) (db.TeamDetail, error)
+	GetTeamByID(ctx context.Context, teamID int64) (db.Team, error)
 	TeamExists(ctx context.Context, teamID int64) (bool, error)
 	ListMatchesForTeam(ctx context.Context, teamID int64, fromInclusive, toExclusive time.Time) ([]db.Match, error)
 }
