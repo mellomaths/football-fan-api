@@ -108,7 +108,7 @@ func (s *Server) handlePatchTeam(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(r.Body)
 	dec.UseNumber()
 	var body map[string]json.RawMessage
-	if err := dec.Decode(&body); err != nil {
+	if err = dec.Decode(&body); err != nil {
 		s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}
@@ -121,11 +121,12 @@ func (s *Server) handlePatchTeam(w http.ResponseWriter, r *http.Request) {
 			patch.TicketSaleURL = nil
 		default:
 			var urlStr string
-			if err := json.Unmarshal(raw, &urlStr); err != nil {
+			if err = json.Unmarshal(raw, &urlStr); err != nil {
 				s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ticket_sale_url must be a string or null"})
 				return
 			}
-			norm, err := validate.TicketSaleURL(urlStr)
+			var norm string
+			norm, err = validate.TicketSaleURL(urlStr)
 			if err != nil {
 				s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
