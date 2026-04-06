@@ -37,6 +37,11 @@ jobs:
           VALIDATE_ALL_CODEBASE: false
           # Match `.agents/...` at repo root (not only `.../.agents/...`)
           FILTER_REGEX_EXCLUDE: .*(\.agents/|\.cursor/|skills-lock\.json).*
+          # Biome still picked up some excluded paths in CI; app code is not Biome-based
+          VALIDATE_BIOME_FORMAT: false
+          VALIDATE_BIOME_LINT: false
+          # Avoid Prettier vs markdownlint fights on long technical lines
+          VALIDATE_MARKDOWN_PRETTIER: false
           # Hand-written Postgres migrations; dialect-specific SQL is noisy for sqlfluff without config
           VALIDATE_SQLFLUFF: false
           # Test fixtures intentionally repeat similar HTML/text

@@ -107,7 +107,9 @@ The scraper image runs `uv sync --frozen --no-dev` at build time so installs mat
 
 ### Pipeline
 
-1. **Connect** to Postgres and build a **team lookup** from `teams` + `team_competitions` + `competitions`: per **competition code** plus a **global** normalized-name map so cup fixtures can match clubs first seen in a national league.
+1. **Connect** to Postgres and build a **team lookup** from `teams` + `team_competitions` + `competitions`:
+   per **competition code** plus a **global** normalized-name map so cup fixtures can match clubs first
+   seen in a national league.
 2. **ESPN:** For each configured ESPN slug (national leagues first in the map, then cups), request the **scoreboard** API for sliding date ranges up to `SCRAPER_HORIZON_DAYS`. Parse events, home/away display names, kickoff time, optional venue. `external_match_id` is scoped by competition to avoid collisions; `source = espn`. Missing clubs are **created** (`teams` + `team_competitions`) for all mapped competitions (leagues and cups).
 3. **Pause** (`SCRAPER_BETWEEN_SOURCES_SEC`).
 4. **Soccerway:** Fetch configured fixture pages, parse HTML tables (best-effort). Build stable ids from links or a fallback string; `source = soccerway`. For Série A/B, unknown names are **auto-created** like ESPN.
