@@ -63,12 +63,11 @@ Returns `200` and a small JSON body, e.g. `{"status":"ok"}`.
 
 #### `GET /teams`
 
-Returns a JSON array of teams, ordered by primary competition code then name. Each item includes:
+Returns a JSON array of teams, ordered by primary competition code then name (same row shape as `GET /teams/{teamId}`). Each item includes:
 
 - `id` — stable integer id (assigned when the club row is first created, usually by a scraper)
 - `name` — display name
-- `competitionCode` — stable code (e.g. `BRASILEIRAO_A`, `BRASILEIRAO_B`); the team’s **primary** competition (`team_competitions.is_primary`)
-- `competitionName` — human-readable name
+- `short_name`, `espn_slug`, `soccerway_id` — strings from the `teams` row when set; omitted when null or empty in the database
 
 Example:
 
@@ -82,7 +81,7 @@ Returns **`200`** and a JSON object:
 
 - `id` — team id  
 - `name` — display name  
-- `short_name`, `espn_slug`, `soccerway_id` — optional strings when present in the database (omitted when null)
+- `short_name`, `espn_slug`, `soccerway_id` — strings from the `teams` row when set; omitted when null or empty in the database
 
 Example:
 

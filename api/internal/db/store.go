@@ -15,21 +15,13 @@ import (
 // ErrTeamNotFound is returned by GetTeamByID when no row exists for the id.
 var ErrTeamNotFound = errors.New("db: team not found")
 
-// Team is a registered team with primary competition metadata (e.g. Brasileirão tier).
+// Team is the JSON body for GET /teams and GET /teams/{teamId}.
 type Team struct {
-	ID              int64  `json:"id"`
-	Name            string `json:"name"`
-	CompetitionCode string `json:"competitionCode"`
-	CompetitionName string `json:"competitionName"`
-}
-
-// TeamDetail is the GET /teams/{teamId} response body.
-type TeamDetail struct {
-	ID          int64   `json:"id"`
-	Name        string  `json:"name"`
-	ShortName   *string `json:"short_name,omitempty"`
-	EspnSlug    *string `json:"espn_slug,omitempty"`
-	SoccerwayID *string `json:"soccerway_id,omitempty"`
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	ShortName   string `json:"short_name,omitempty"`
+	EspnSlug    string `json:"espn_slug,omitempty"`
+	SoccerwayID string `json:"soccerway_id,omitempty"`
 }
 
 // TeamMatchSide is a club in a match response (GET /teams/{id}/matches).
@@ -73,11 +65,16 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
-// ListTeams returns all teams ordered by competition code then name.
+// ListTeams returns all teams ordered by primary competition code then name.
 // Uses primary membership when set; otherwise picks one linked competition (is_primary DESC).
 func (s *Store) ListTeams(ctx context.Context) ([]Team, error) {
 	rows, err := s.pool.Query(ctx, fmt.Sprintf(`
-		SELECT DISTINCT ON (t.id) t.id, t.name, c.code, c.name
+		SELECT DISTINCT ON (t.id)
+		       t.id,
+		       t.name,
+		       COALESCE(t.short_name, ''),
+		       COALESCE(t.espn_slug, ''),
+		       COALESCE(t.soccerway_id, '')
 		FROM %s.teams t
 		JOIN %s.team_competitions tc ON tc.team_id = t.id
 		JOIN %s.competitions c ON c.id = tc.competition_id
@@ -91,7 +88,7 @@ func (s *Store) ListTeams(ctx context.Context) ([]Team, error) {
 	out := make([]Team, 0)
 	for rows.Next() {
 		var t Team
-		if err := rows.Scan(&t.ID, &t.Name, &t.CompetitionCode, &t.CompetitionName); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.ShortName, &t.EspnSlug, &t.SoccerwayID); err != nil {
 			return nil, fmt.Errorf("scan team: %w", err)
 		}
 		out = append(out, t)
@@ -113,24 +110,24 @@ func (s *Store) TeamExists(ctx context.Context, teamID int64) (bool, error) {
 }
 
 // GetTeamByID returns one team by primary key, or ErrTeamNotFound.
-func (s *Store) GetTeamByID(ctx context.Context, teamID int64) (TeamDetail, error) {
-	var d TeamDetail
-	var sn, es, sw sql.NullString
+func (s *Store) GetTeamByID(ctx context.Context, teamID int64) (Team, error) {
+	var t Team
 	err := s.pool.QueryRow(ctx, fmt.Sprintf(`
-		SELECT t.id, t.name, t.short_name, t.espn_slug, t.soccerway_id
+		SELECT t.id,
+		       t.name,
+		       COALESCE(t.short_name, ''),
+		       COALESCE(t.espn_slug, ''),
+		       COALESCE(t.soccerway_id, '')
 		FROM %s.teams t
 		WHERE t.id = $1
-	`, AppSchema), teamID).Scan(&d.ID, &d.Name, &sn, &es, &sw)
+	`, AppSchema), teamID).Scan(&t.ID, &t.Name, &t.ShortName, &t.EspnSlug, &t.SoccerwayID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return TeamDetail{}, ErrTeamNotFound
+			return Team{}, ErrTeamNotFound
 		}
-		return TeamDetail{}, fmt.Errorf("get team: %w", err)
+		return Team{}, fmt.Errorf("get team: %w", err)
 	}
-	d.ShortName = nullStrPtr(sn)
-	d.EspnSlug = nullStrPtr(es)
-	d.SoccerwayID = nullStrPtr(sw)
-	return d, nil
+	return t, nil
 }
 
 func nullStrPtr(ns sql.NullString) *string {

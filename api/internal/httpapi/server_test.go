@@ -15,7 +15,7 @@ import (
 
 type stubStore struct {
 	teams    []db.Team
-	teamByID map[int64]db.TeamDetail
+	teamByID map[int64]db.Team
 	exists   map[int64]bool
 	matches  []db.Match
 	err      error
@@ -28,14 +28,14 @@ func (s *stubStore) ListTeams(_ context.Context) ([]db.Team, error) {
 	return s.teams, nil
 }
 
-func (s *stubStore) GetTeamByID(_ context.Context, teamID int64) (db.TeamDetail, error) {
+func (s *stubStore) GetTeamByID(_ context.Context, teamID int64) (db.Team, error) {
 	if s.err != nil {
-		return db.TeamDetail{}, s.err
+		return db.Team{}, s.err
 	}
 	if d, ok := s.teamByID[teamID]; ok {
 		return d, nil
 	}
-	return db.TeamDetail{}, db.ErrTeamNotFound
+	return db.Team{}, db.ErrTeamNotFound
 }
 
 func (s *stubStore) TeamExists(_ context.Context, teamID int64) (bool, error) {
@@ -119,17 +119,14 @@ func TestHandleTeamMatchesOK(t *testing.T) {
 func TestHandleTeamByIDOK(t *testing.T) {
 	t.Parallel()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	fla := "FLA"
-	es := "flamengo"
-	sw := "flamengo"
 	st := &stubStore{
-		teamByID: map[int64]db.TeamDetail{
+		teamByID: map[int64]db.Team{
 			7: {
 				ID:          7,
 				Name:        "Flamengo",
-				ShortName:   &fla,
-				EspnSlug:    &es,
-				SoccerwayID: &sw,
+				ShortName:   "FLA",
+				EspnSlug:    "flamengo",
+				SoccerwayID: "flamengo",
 			},
 		},
 	}
@@ -142,11 +139,11 @@ func TestHandleTeamByIDOK(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d, want 200", rec.Code)
 	}
-	var out db.TeamDetail
+	var out db.Team
 	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
-	if out.ID != 7 || out.Name != "Flamengo" || out.ShortName == nil || *out.ShortName != "FLA" {
+	if out.ID != 7 || out.Name != "Flamengo" || out.ShortName != "FLA" {
 		t.Fatalf("unexpected body: %+v", out)
 	}
 }
@@ -154,7 +151,7 @@ func TestHandleTeamByIDOK(t *testing.T) {
 func TestHandleTeamByIDNotFound(t *testing.T) {
 	t.Parallel()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	st := &stubStore{teamByID: map[int64]db.TeamDetail{}}
+	st := &stubStore{teamByID: map[int64]db.Team{}}
 	srv := NewServer(log, st)
 
 	req := httptest.NewRequest(http.MethodGet, "/teams/99", nil)
