@@ -51,11 +51,15 @@ services:
       # checkov:skip=CKV_SECRET_4: documented local-only credentials for Compose networking
       DATABASE_URL: postgres://football:football@postgres:5432/football?sslmode=disable
       SCRAPER_INTERVAL_HOURS: ${SCRAPER_INTERVAL_HOURS:-24}
+      TICKET_SCRAPER_INTERVAL_MINUTES: ${TICKET_SCRAPER_INTERVAL_MINUTES:-30}
+      TICKET_SCRAPER_ENABLED: ${TICKET_SCRAPER_ENABLED:-true}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       SCRAPER_CRON: ${SCRAPER_CRON:-}
     depends_on:
       postgres:
         condition: service_healthy
+      api:
+        condition: service_started
 
 volumes:
   pgdata:

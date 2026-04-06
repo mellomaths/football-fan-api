@@ -53,6 +53,19 @@ The process **always runs one full scrape immediately**, then starts the schedul
 | `SCRAPER_INTERVAL_HOURS` | If `SCRAPER_CRON` is unset, repeat every this many hours (integer).                                                                       |
 | *(default)*              | If neither is set, repeats every **24** hours.                                                                                            |
 
+#### Ticket announcements (Flamengo and future adapters)
+
+After the first fixture scrape, the process runs **one ticket scrape** immediately, then repeats on a **separate interval** (default **30 minutes**). Teams with a non-empty **`ticket_sale_url`** in the database are considered; the Flamengo adapter polls that URL as a **news listing** (e.g. futebol notícias), finds posts whose title contains **“informações sobre venda de ingresso”**, and upserts **`footballfan.ticket_announcements`** rows for **home** fixtures only. Each row stores the full plain-text **sale schedule** block (`Data e hora das aberturas de vendas` through before `Valores:`) and the full **prices / serviços** block (`Valores:` through before Estacionamento or cancelamento info).
+
+| Variable                         | Default | Description                                                                 |
+| -------------------------------- | ------- | --------------------------------------------------------------------------- |
+| `TICKET_SCRAPER_INTERVAL_MINUTES`| `30`    | Repeat ticket scrape every this many minutes (integer ≥ 1).                 |
+| `TICKET_SCRAPER_ENABLED`       | `true`  | Set to `false`/`0` to disable ticket runs (fixture scrape still runs).      |
+| `FLAMENGO_TICKET_TITLE_PHRASE`   | *(see code)* | Override the title substring filter (Unicode-normalized match).        |
+| `FLAMENGO_TICKET_MAX_ARTICLES_PER_RUN` | `25` | Cap how many matching home articles to upsert per run (1–100).   |
+
+Set **`teams.ticket_sale_url`** via the Go API **`PATCH /teams/{teamId}`** (see [`api/README.md`](../api/README.md)) or SQL after migrations.
+
 #### General
 
 | Variable                      | Default | Description                                      |
