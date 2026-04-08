@@ -43,8 +43,8 @@ restart:
     {{compose}} up -d
     {{compose}} exec -T postgres sh -c 'until pg_isready -U football -d football; do sleep 1; done'
     {{compose}} exec -T postgres psql -U football -d football -v ON_ERROR_STOP=1 -c 'DROP SCHEMA IF EXISTS footballfan CASCADE;'
-    {{compose}} build --no-cache api scraper
-    {{compose}} up -d --force-recreate api scraper
+    {{compose}} build --no-cache api scraper telegram
+    {{compose}} up -d --force-recreate api scraper telegram
 
 # Follow logs (all services). Pass names to scope: `just logs api scraper`.
 logs *args:

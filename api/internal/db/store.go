@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -65,6 +66,7 @@ type Match struct {
 
 // TicketAnnouncement is one scraped article row for GET /teams/{id}/tickets/announcements.
 type TicketAnnouncement struct {
+	ID               int64  `json:"id"`
 	SaleScheduleText string `json:"sale_schedule_text"`
 	PricesText       string `json:"prices_text"`
 	ScrapedAt        string `json:"scraped_at"`
@@ -81,10 +83,13 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
-// ListTeams returns all teams ordered by primary competition code then name.
+// ListTeams returns teams ordered by primary competition code then name.
 // Uses primary membership when set; otherwise picks one linked competition (is_primary DESC).
-func (s *Store) ListTeams(ctx context.Context) ([]Team, error) {
-	rows, err := s.pool.Query(ctx, fmt.Sprintf(`
+// If nameQuery is non-empty after trimming, only teams whose name or short_name contains
+// nameQuery (case-insensitive substring) are returned.
+func (s *Store) ListTeams(ctx context.Context, nameQuery string) ([]Team, error) {
+	nameQuery = strings.TrimSpace(nameQuery)
+	base := fmt.Sprintf(`
 		SELECT DISTINCT ON (t.id)
 		       t.id,
 		       t.name,
@@ -95,8 +100,20 @@ func (s *Store) ListTeams(ctx context.Context) ([]Team, error) {
 		FROM %s.teams t
 		JOIN %s.team_competitions tc ON tc.team_id = t.id
 		JOIN %s.competitions c ON c.id = tc.competition_id
+	`, AppSchema, AppSchema, AppSchema)
+	var rows pgx.Rows
+	var err error
+	if nameQuery == "" {
+		rows, err = s.pool.Query(ctx, base+`
 		ORDER BY t.id, tc.is_primary DESC, c.code
-	`, AppSchema, AppSchema, AppSchema))
+	`)
+	} else {
+		rows, err = s.pool.Query(ctx, base+`
+		WHERE strpos(lower(t.name), lower($1)) > 0
+		   OR strpos(lower(COALESCE(t.short_name, '')), lower($1)) > 0
+		ORDER BY t.id, tc.is_primary DESC, c.code
+	`, nameQuery)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("list teams: %w", err)
 	}
@@ -267,7 +284,8 @@ func (s *Store) ListTicketAnnouncementsForTeam(
 	fromInclusive, toInclusive time.Time,
 ) ([]TicketAnnouncement, error) {
 	rows, err := s.pool.Query(ctx, fmt.Sprintf(`
-		SELECT ta.sale_schedule_text,
+		SELECT ta.id,
+		       ta.sale_schedule_text,
 		       ta.prices_text,
 		       ta.scraped_at,
 		       m.id,
@@ -316,6 +334,7 @@ func (s *Store) ListTicketAnnouncementsForTeam(
 		var cid sql.NullInt64
 		var cname, ccode sql.NullString
 		if err := rows.Scan(
+			&ann.ID,
 			&ann.SaleScheduleText,
 			&ann.PricesText,
 			&scraped,

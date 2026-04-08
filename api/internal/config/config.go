@@ -8,8 +8,9 @@ import (
 
 // Config holds process configuration from the environment.
 type Config struct {
-	DatabaseURL string
-	HTTPAddr    string
+	DatabaseURL    string
+	HTTPAddr       string
+	InternalAPIKey string // optional; when set, required as X-API-Key for POST /users and related routes
 }
 
 // Load reads required configuration. DATABASE_URL must be set.
@@ -23,7 +24,8 @@ func Load() (Config, error) {
 		addr = ":8080"
 	}
 	return Config{
-		DatabaseURL: dbURL,
-		HTTPAddr:    addr,
+		DatabaseURL:    dbURL,
+		HTTPAddr:       addr,
+		InternalAPIKey: os.Getenv("API_INTERNAL_KEY"),
 	}, nil
 }

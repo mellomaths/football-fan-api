@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mellomaths/football-fan-api/api/internal/db"
@@ -16,23 +17,29 @@ import (
 
 // Store is the read model used by HTTP handlers (implemented by *db.Store).
 type Store interface {
-	ListTeams(ctx context.Context) ([]db.Team, error)
+	ListTeams(ctx context.Context, nameQuery string) ([]db.Team, error)
 	GetTeamByID(ctx context.Context, teamID int64) (db.Team, error)
 	PatchTeamTicketSaleURL(ctx context.Context, teamID int64, patch db.TeamTicketSalePatch) (db.Team, error)
 	TeamExists(ctx context.Context, teamID int64) (bool, error)
 	ListMatchesForTeam(ctx context.Context, teamID int64, fromInclusive, toExclusive time.Time) ([]db.Match, error)
 	ListTicketAnnouncementsForTeam(ctx context.Context, sellerTeamID int64, fromInclusive, toInclusive time.Time) ([]db.TicketAnnouncement, error)
+	UpsertSubscriber(ctx context.Context, externalKey, deliveryTarget string, displayName *string, metadata json.RawMessage) (db.Subscriber, error)
+	GetSubscriberByID(ctx context.Context, id int64) (db.Subscriber, error)
+	AddSubscriberTeamSubscription(ctx context.Context, subscriberID, teamID int64) error
+	ListSubscriberSubscriptions(ctx context.Context) ([]db.SubscriptionRow, error)
+	TryInsertNotificationReceipt(ctx context.Context, subscriberID, announcementID int64) (inserted bool, err error)
 }
 
 // Server wires HTTP handlers to the data store.
 type Server struct {
-	log   *slog.Logger
-	store Store
+	log            *slog.Logger
+	store          Store
+	internalAPIKey string
 }
 
-// NewServer returns an API server.
-func NewServer(log *slog.Logger, store Store) *Server {
-	return &Server{log: log, store: store}
+// NewServer returns an API server. internalAPIKey, when non-empty, is required as X-API-Key for subscriber routes.
+func NewServer(log *slog.Logger, store Store, internalAPIKey string) *Server {
+	return &Server{log: log, store: store, internalAPIKey: internalAPIKey}
 }
 
 // Handler returns the root mux with all routes registered.
@@ -43,8 +50,168 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /teams/{teamId}/matches", s.handleTeamMatches)
 	mux.HandleFunc("GET /teams/{teamId}", s.handleTeamByID)
 	mux.HandleFunc("PATCH /teams/{teamId}", s.handlePatchTeam)
+	mux.HandleFunc("POST /users", s.requireInternalAuth(s.handlePostUsers))
+	mux.HandleFunc("POST /users/{userId}/subscription", s.requireInternalAuth(s.handlePostUserSubscription))
+	mux.HandleFunc("GET /users/subscriptions", s.requireInternalAuth(s.handleGetUserSubscriptions))
+	mux.HandleFunc("POST /notification-receipts", s.requireInternalAuth(s.handlePostNotificationReceipt))
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	return mux
+}
+
+func (s *Server) requireInternalAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.internalAPIKey == "" {
+			s.writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "internal subscriber API is not configured (set API_INTERNAL_KEY)",
+			})
+			return
+		}
+		if r.Header.Get("X-API-Key") != s.internalAPIKey {
+			s.writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		next(w, r)
+	}
+}
+
+type postUserRequest struct {
+	ExternalKey    string          `json:"external_key"`
+	DeliveryTarget string          `json:"delivery_target"`
+	DisplayName    *string         `json:"display_name"`
+	Metadata       json.RawMessage `json:"metadata"`
+}
+
+func (s *Server) handlePostUsers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	var body postUserRequest
+	if err := dec.Decode(&body); err != nil {
+		s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	if strings.TrimSpace(body.ExternalKey) == "" || strings.TrimSpace(body.DeliveryTarget) == "" {
+		s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "external_key and delivery_target are required"})
+		return
+	}
+	ctx := r.Context()
+	out, err := s.store.UpsertSubscriber(ctx, strings.TrimSpace(body.ExternalKey), strings.TrimSpace(body.DeliveryTarget), body.DisplayName, body.Metadata)
+	if err != nil {
+		s.log.Error("upsert subscriber", slog.Any("err", err))
+		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	s.writeJSON(w, http.StatusOK, out)
+}
+
+type postSubscriptionRequest struct {
+	TeamID int64 `json:"team_id"`
+}
+
+func (s *Server) handlePostUserSubscription(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	userStr := r.PathValue("userId")
+	subscriberID, err := strconv.ParseInt(userStr, 10, 64)
+	if err != nil || subscriberID < 1 {
+		s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid user id"})
+		return
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	var body postSubscriptionRequest
+	if decodeErr := dec.Decode(&body); decodeErr != nil {
+		s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	if body.TeamID < 1 {
+		s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "team_id is required"})
+		return
+	}
+	ctx := r.Context()
+	if _, getErr := s.store.GetSubscriberByID(ctx, subscriberID); getErr != nil {
+		if errors.Is(getErr, db.ErrSubscriberNotFound) {
+			s.writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
+			return
+		}
+		s.log.Error("get subscriber", slog.Any("err", getErr))
+		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	ok, err := s.store.TeamExists(ctx, body.TeamID)
+	if err != nil {
+		s.log.Error("team exists", slog.Any("err", err))
+		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	if !ok {
+		s.writeJSON(w, http.StatusNotFound, map[string]string{"error": "team not found"})
+		return
+	}
+	if err := s.store.AddSubscriberTeamSubscription(ctx, subscriberID, body.TeamID); err != nil {
+		if errors.Is(err, db.ErrSubscriptionDuplicate) {
+			s.writeJSON(w, http.StatusConflict, map[string]string{"error": "already subscribed to this team"})
+			return
+		}
+		s.log.Error("add subscription", slog.Any("err", err))
+		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	s.writeJSON(w, http.StatusCreated, map[string]string{"status": "created"})
+}
+
+func (s *Server) handleGetUserSubscriptions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		s.writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	ctx := r.Context()
+	rows, err := s.store.ListSubscriberSubscriptions(ctx)
+	if err != nil {
+		s.log.Error("list subscriber subscriptions", slog.Any("err", err))
+		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	if rows == nil {
+		rows = []db.SubscriptionRow{}
+	}
+	s.writeJSON(w, http.StatusOK, rows)
+}
+
+type postNotificationReceiptRequest struct {
+	SubscriberID   int64 `json:"subscriber_id"`
+	AnnouncementID int64 `json:"announcement_id"`
+}
+
+func (s *Server) handlePostNotificationReceipt(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	var body postNotificationReceiptRequest
+	if err := dec.Decode(&body); err != nil {
+		s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	if body.SubscriberID < 1 || body.AnnouncementID < 1 {
+		s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "subscriber_id and announcement_id are required"})
+		return
+	}
+	ctx := r.Context()
+	inserted, err := s.store.TryInsertNotificationReceipt(ctx, body.SubscriberID, body.AnnouncementID)
+	if err != nil {
+		s.log.Error("notification receipt", slog.Any("err", err))
+		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
+	s.writeJSON(w, http.StatusOK, map[string]bool{"inserted": inserted})
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
@@ -57,9 +224,10 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleTeams(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	teams, err := s.store.ListTeams(ctx)
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	teams, err := s.store.ListTeams(ctx, name)
 	if err != nil {
-		s.log.Error("list teams", slog.Any("err", err))
+		s.log.Error("list teams", slog.String("name_filter", name), slog.Any("err", err))
 		s.writeJSON(
 			w,
 			http.StatusInternalServerError,
@@ -69,6 +237,15 @@ func (s *Server) handleTeams(w http.ResponseWriter, r *http.Request) {
 	}
 	if teams == nil {
 		teams = []db.Team{}
+	}
+	s.log.Info("list teams",
+		slog.String("name_filter", name),
+		slog.Int("team_count", len(teams)),
+	)
+	if name != "" && len(teams) == 0 {
+		s.log.Warn("list teams returned no rows for name filter — only teams linked via team_competitions appear in GET /teams; raw teams rows without a competition link are excluded",
+			slog.String("name_filter", name),
+		)
 	}
 	s.writeJSON(w, http.StatusOK, teams)
 }

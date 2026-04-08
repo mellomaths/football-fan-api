@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,7 +23,11 @@ func main() {
 }
 
 func run() int {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logLevel := slog.LevelInfo
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("LOG_LEVEL")), "debug") {
+		logLevel = slog.LevelDebug
+	}
+	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -53,7 +58,7 @@ func run() int {
 	}
 
 	store := db.NewStore(pool)
-	srv := httpapi.NewServer(log, store)
+	srv := httpapi.NewServer(log, store, cfg.InternalAPIKey)
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,

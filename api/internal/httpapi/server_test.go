@@ -20,14 +20,26 @@ type stubStore struct {
 	exists        map[int64]bool
 	matches       []db.Match
 	announcements []db.TicketAnnouncement
+	subs          []db.SubscriptionRow
 	err           error
 }
 
-func (s *stubStore) ListTeams(_ context.Context) ([]db.Team, error) {
+func (s *stubStore) ListTeams(_ context.Context, nameQuery string) ([]db.Team, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
-	return s.teams, nil
+	if nameQuery == "" {
+		return s.teams, nil
+	}
+	var out []db.Team
+	nq := strings.ToLower(nameQuery)
+	for _, t := range s.teams {
+		if strings.Contains(strings.ToLower(t.Name), nq) ||
+			strings.Contains(strings.ToLower(t.ShortName), nq) {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
 func (s *stubStore) GetTeamByID(_ context.Context, teamID int64) (db.Team, error) {
@@ -84,11 +96,98 @@ func (s *stubStore) ListTicketAnnouncementsForTeam(
 	return s.announcements, nil
 }
 
+func (s *stubStore) UpsertSubscriber(context.Context, string, string, *string, json.RawMessage) (db.Subscriber, error) {
+	if s.err != nil {
+		return db.Subscriber{}, s.err
+	}
+	return db.Subscriber{}, nil
+}
+
+func (s *stubStore) GetSubscriberByID(_ context.Context, _ int64) (db.Subscriber, error) {
+	if s.err != nil {
+		return db.Subscriber{}, s.err
+	}
+	return db.Subscriber{}, db.ErrSubscriberNotFound
+}
+
+func (s *stubStore) AddSubscriberTeamSubscription(context.Context, int64, int64) error {
+	return s.err
+}
+
+func (s *stubStore) ListSubscriberSubscriptions(context.Context) ([]db.SubscriptionRow, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.subs, nil
+}
+
+func (s *stubStore) TryInsertNotificationReceipt(context.Context, int64, int64) (bool, error) {
+	if s.err != nil {
+		return false, s.err
+	}
+	return true, nil
+}
+
+func TestHandleTeamsOK(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st := &stubStore{
+		teams: []db.Team{
+			{ID: 1, Name: "CR Flamengo", ShortName: "CRF"},
+			{ID: 2, Name: "Flamengo FC", ShortName: "FFC"},
+		},
+	}
+	srv := NewServer(log, st, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/teams", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", rec.Code)
+	}
+	var out []db.Team
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("len %d, want 2", len(out))
+	}
+}
+
+func TestHandleTeamsNameFilter(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	st := &stubStore{
+		teams: []db.Team{
+			{ID: 1, Name: "CR Flamengo", ShortName: "CRF"},
+			{ID: 2, Name: "Flamengo FC", ShortName: "FFC"},
+			{ID: 3, Name: "Other Club", ShortName: "OC"},
+		},
+	}
+	srv := NewServer(log, st, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/teams?name=Flamengo", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", rec.Code)
+	}
+	var out []db.Team
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("len %d, want 2", len(out))
+	}
+}
+
 func TestHandleTeamTicketAnnouncementsValidation(t *testing.T) {
 	t.Parallel()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	st := &stubStore{exists: map[int64]bool{1: true}}
-	srv := NewServer(log, st)
+	srv := NewServer(log, st, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/teams/1/tickets/announcements", nil)
 	rec := httptest.NewRecorder()
@@ -118,6 +217,7 @@ func TestHandleTeamTicketAnnouncementsOK(t *testing.T) {
 		exists: map[int64]bool{6: true},
 		announcements: []db.TicketAnnouncement{
 			{
+				ID:               42,
 				SaleScheduleText: "Data e hora das aberturas de vendas...",
 				PricesText:       "Valores:",
 				ScrapedAt:        "2026-04-09T00:30:00Z",
@@ -125,7 +225,7 @@ func TestHandleTeamTicketAnnouncementsOK(t *testing.T) {
 			},
 		},
 	}
-	srv := NewServer(log, st)
+	srv := NewServer(log, st, "")
 
 	req := httptest.NewRequest(
 		http.MethodGet,
@@ -158,7 +258,7 @@ func TestHandleTeamMatchesValidation(t *testing.T) {
 	t.Parallel()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	st := &stubStore{exists: map[int64]bool{1: true}}
-	srv := NewServer(log, st)
+	srv := NewServer(log, st, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/teams/1/matches", nil)
 	rec := httptest.NewRecorder()
@@ -189,7 +289,7 @@ func TestHandleTeamMatchesOK(t *testing.T) {
 			},
 		},
 	}
-	srv := NewServer(log, st)
+	srv := NewServer(log, st, "")
 
 	req := httptest.NewRequest(
 		http.MethodGet,
@@ -228,7 +328,7 @@ func TestHandleTeamByIDOK(t *testing.T) {
 			},
 		},
 	}
-	srv := NewServer(log, st)
+	srv := NewServer(log, st, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/teams/7", nil)
 	rec := httptest.NewRecorder()
@@ -250,7 +350,7 @@ func TestHandleTeamByIDNotFound(t *testing.T) {
 	t.Parallel()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	st := &stubStore{teamByID: map[int64]db.Team{}}
-	srv := NewServer(log, st)
+	srv := NewServer(log, st, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/teams/99", nil)
 	rec := httptest.NewRecorder()
@@ -270,7 +370,7 @@ func TestHandlePatchTeamTicketSaleURL(t *testing.T) {
 			1: {ID: 1, Name: "Flamengo", ShortName: "FLA"},
 		},
 	}
-	srv := NewServer(log, st)
+	srv := NewServer(log, st, "")
 
 	req := httptest.NewRequest(
 		http.MethodPatch,
@@ -302,7 +402,7 @@ func TestHandlePatchTeamClearTicketSaleURL(t *testing.T) {
 			1: {ID: 1, Name: "A", TicketSaleURL: &u},
 		},
 	}
-	srv := NewServer(log, st)
+	srv := NewServer(log, st, "")
 
 	req := httptest.NewRequest(http.MethodPatch, "/teams/1", strings.NewReader(`{"ticket_sale_url":null}`))
 	req.Header.Set("Content-Type", "application/json")
