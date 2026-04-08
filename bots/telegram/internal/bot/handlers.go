@@ -33,6 +33,10 @@ func (d Deps) Subscribe(b *gotgbot.Bot, ctx *ext.Context) error {
 		_, err := b.SendMessage(ctx.EffectiveChat.Id, "Usage: /subscribe <team name>", nil)
 		return err
 	}
+	return d.subscribeWithQuery(b, ctx, q)
+}
+
+func (d Deps) subscribeWithQuery(b *gotgbot.Bot, ctx *ext.Context, q string) error {
 	if d.Log != nil {
 		d.Log.Info("subscribe command",
 			slog.String("name_query", q),
@@ -44,9 +48,7 @@ func (d Deps) Subscribe(b *gotgbot.Bot, ctx *ext.Context) error {
 
 	teams, err := d.API.ListTeams(c, q)
 	if err != nil {
-		if d.Log != nil {
-			d.Log.Error("subscribe list teams failed", slog.String("name_query", q), slog.Any("err", err))
-		}
+		d.logSubscribeListTeamsFailed(q, err)
 		_, sendErr := b.SendMessage(ctx.EffectiveChat.Id, "Could not reach the API. Try again later.", nil)
 		return errors.Join(err, sendErr)
 	}
@@ -54,18 +56,23 @@ func (d Deps) Subscribe(b *gotgbot.Bot, ctx *ext.Context) error {
 	if err != nil {
 		return err
 	}
+	return d.completeSubscribe(b, ctx, c, teamID)
+}
 
+func (d Deps) logSubscribeListTeamsFailed(q string, listErr error) {
+	if d.Log == nil {
+		return
+	}
+	d.Log.Error("subscribe list teams failed", slog.String("name_query", q), slog.Any("err", listErr))
+}
+
+func (d Deps) completeSubscribe(b *gotgbot.Bot, ctx *ext.Context, c context.Context, teamID int64) error {
 	team, err := d.API.GetTeam(c, teamID)
 	if err != nil {
 		_, sendErr := b.SendMessage(ctx.EffectiveChat.Id, "Could not load team details.", nil)
 		return errors.Join(err, sendErr)
 	}
-	if team.TicketSaleURL == nil || strings.TrimSpace(*team.TicketSaleURL) == "" {
-		if _, warnErr := b.SendMessage(ctx.EffectiveChat.Id,
-			"Note: this team has no ticket sale URL configured yet. You may not receive ticket sale announcements.", nil); warnErr != nil && d.Log != nil {
-			d.Log.Warn("send ticket url notice", slog.Any("err", warnErr))
-		}
-	}
+	d.maybeWarnMissingTicketURL(b, ctx, team)
 
 	u := ctx.EffectiveUser
 	if u == nil {
@@ -99,6 +106,16 @@ func (d Deps) Subscribe(b *gotgbot.Bot, ctx *ext.Context) error {
 	_, err = b.SendMessage(ctx.EffectiveChat.Id,
 		fmt.Sprintf("You are subscribed to match and ticket updates for %s.", team.Name), nil)
 	return err
+}
+
+func (d Deps) maybeWarnMissingTicketURL(b *gotgbot.Bot, ctx *ext.Context, team apiclient.Team) {
+	if team.TicketSaleURL != nil && strings.TrimSpace(*team.TicketSaleURL) != "" {
+		return
+	}
+	if _, warnErr := b.SendMessage(ctx.EffectiveChat.Id,
+		"Note: this team has no ticket sale URL configured yet. You may not receive ticket sale announcements.", nil); warnErr != nil && d.Log != nil {
+		d.Log.Warn("send ticket url notice", slog.Any("err", warnErr))
+	}
 }
 
 func (d Deps) resolveSubscribeTeamID(b *gotgbot.Bot, ctx *ext.Context, q string, teams []apiclient.Team) (int64, error) {
