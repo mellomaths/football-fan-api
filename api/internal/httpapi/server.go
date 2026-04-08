@@ -125,7 +125,7 @@ func (s *Server) handlePostUserSubscription(w http.ResponseWriter, r *http.Reque
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	var body postSubscriptionRequest
-	if err := dec.Decode(&body); err != nil {
+	if decodeErr := dec.Decode(&body); decodeErr != nil {
 		s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}
@@ -134,12 +134,12 @@ func (s *Server) handlePostUserSubscription(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	ctx := r.Context()
-	if _, err := s.store.GetSubscriberByID(ctx, subscriberID); err != nil {
-		if errors.Is(err, db.ErrSubscriberNotFound) {
+	if _, getErr := s.store.GetSubscriberByID(ctx, subscriberID); getErr != nil {
+		if errors.Is(getErr, db.ErrSubscriberNotFound) {
 			s.writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
 			return
 		}
-		s.log.Error("get subscriber", slog.Any("err", err))
+		s.log.Error("get subscriber", slog.Any("err", getErr))
 		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 		return
 	}

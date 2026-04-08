@@ -194,9 +194,9 @@ def link_team_competition(
             # Cup / international: re-scrapes call link every fixture. If this pair already exists,
             # skip — do not recompute is_primary from COUNT() (that would falsely demote the only primary row).
             cur.execute(
-                sql.SQL(
-                    "SELECT 1 FROM {} WHERE team_id = %s AND competition_id = %s LIMIT 1"
-                ).format(table("team_competitions")),
+                sql.SQL("SELECT 1 FROM {} WHERE team_id = %s AND competition_id = %s LIMIT 1").format(
+                    table("team_competitions")
+                ),
                 (team_id, competition_id),
             )
             if cur.fetchone():
