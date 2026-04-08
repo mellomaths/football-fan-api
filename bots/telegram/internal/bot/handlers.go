@@ -56,7 +56,7 @@ func (d Deps) subscribeWithQuery(b *gotgbot.Bot, ctx *ext.Context, q string) err
 	if err != nil {
 		return err
 	}
-	return d.completeSubscribe(b, ctx, c, teamID)
+	return d.completeSubscribe(c, b, ctx, teamID)
 }
 
 func (d Deps) logSubscribeListTeamsFailed(q string, listErr error) {
@@ -66,7 +66,7 @@ func (d Deps) logSubscribeListTeamsFailed(q string, listErr error) {
 	d.Log.Error("subscribe list teams failed", slog.String("name_query", q), slog.Any("err", listErr))
 }
 
-func (d Deps) completeSubscribe(b *gotgbot.Bot, ctx *ext.Context, c context.Context, teamID int64) error {
+func (d Deps) completeSubscribe(c context.Context, b *gotgbot.Bot, ctx *ext.Context, teamID int64) error {
 	team, err := d.API.GetTeam(c, teamID)
 	if err != nil {
 		_, sendErr := b.SendMessage(ctx.EffectiveChat.Id, "Could not load team details.", nil)
