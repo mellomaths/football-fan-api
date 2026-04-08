@@ -68,7 +68,11 @@ func run() int {
 		return 1
 	}
 
-	sched := notify.Start(b, api, loc)
+	sched, err := notify.Start(b, api, loc)
+	if err != nil {
+		log.Error("notify scheduler", slog.Any("err", err))
+		return 1
+	}
 	log.Info("telegram bot running")
 
 	sig := make(chan os.Signal, 1)

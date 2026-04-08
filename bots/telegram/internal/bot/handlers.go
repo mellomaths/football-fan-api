@@ -50,28 +50,8 @@ func (d Deps) Subscribe(b *gotgbot.Bot, ctx *ext.Context) error {
 		_, sendErr := b.SendMessage(ctx.EffectiveChat.Id, "Could not reach the API. Try again later.", nil)
 		return errors.Join(err, sendErr)
 	}
-	teamID, err := teamresolve.PickTeam(teams)
+	teamID, err := d.resolveSubscribeTeamID(b, ctx, q, teams)
 	if err != nil {
-		if errors.Is(err, teamresolve.ErrNotFound) {
-			if d.Log != nil {
-				d.Log.Warn("subscribe no team match",
-					slog.String("name_query", q),
-					slog.Int("teams_from_api", len(teams)),
-					slog.String("hint", "GET /teams only returns clubs with at least one team_competitions row; verify the club is linked to a competition or compare with SQL on team_competitions, not teams alone"),
-				)
-			}
-			_, err := b.SendMessage(ctx.EffectiveChat.Id, "No team matched that name.", nil)
-			return err
-		}
-		if errors.Is(err, teamresolve.ErrAmbiguous) {
-			names := make([]string, 0, len(teams))
-			for _, t := range teams {
-				names = append(names, fmt.Sprintf("%s (id %d)", t.Name, t.ID))
-			}
-			_, sendErr := b.SendMessage(ctx.EffectiveChat.Id,
-				"Several teams matched. Please pick a more specific name.\n"+strings.Join(names, "\n"), nil)
-			return sendErr
-		}
 		return err
 	}
 
@@ -81,14 +61,16 @@ func (d Deps) Subscribe(b *gotgbot.Bot, ctx *ext.Context) error {
 		return errors.Join(err, sendErr)
 	}
 	if team.TicketSaleURL == nil || strings.TrimSpace(*team.TicketSaleURL) == "" {
-		_, _ = b.SendMessage(ctx.EffectiveChat.Id,
-			"Note: this team has no ticket sale URL configured yet. You may not receive ticket sale announcements.", nil)
+		if _, warnErr := b.SendMessage(ctx.EffectiveChat.Id,
+			"Note: this team has no ticket sale URL configured yet. You may not receive ticket sale announcements.", nil); warnErr != nil && d.Log != nil {
+			d.Log.Warn("send ticket url notice", slog.Any("err", warnErr))
+		}
 	}
 
 	u := ctx.EffectiveUser
 	if u == nil {
-		_, err := b.SendMessage(ctx.EffectiveChat.Id, "Could not read your user profile.", nil)
-		return err
+		_, sendErr := b.SendMessage(ctx.EffectiveChat.Id, "Could not read your user profile.", nil)
+		return sendErr
 	}
 	extKey := fmt.Sprintf("tg:%d", u.Id)
 	chatStr := strconv.FormatInt(ctx.EffectiveChat.Id, 10)
@@ -97,15 +79,18 @@ func (d Deps) Subscribe(b *gotgbot.Bot, ctx *ext.Context) error {
 	if display != "" {
 		dispPtr = &display
 	}
-	meta, _ := json.Marshal(map[string]string{"integration": "telegram"})
+	meta, err := json.Marshal(map[string]string{"integration": "telegram"})
+	if err != nil {
+		return fmt.Errorf("marshal subscriber meta: %w", err)
+	}
 	sub, err := d.API.UpsertUser(c, extKey, chatStr, dispPtr, meta)
 	if err != nil {
 		_, sendErr := b.SendMessage(ctx.EffectiveChat.Id, "Could not register your account with the API.", nil)
 		return errors.Join(err, sendErr)
 	}
-	if err := d.API.AddSubscription(c, sub.ID, teamID); err != nil {
+	if subErr := d.API.AddSubscription(c, sub.ID, teamID); subErr != nil {
 		msg := "Could not save subscription."
-		if strings.Contains(err.Error(), "409") {
+		if strings.Contains(subErr.Error(), "409") {
 			msg = "You are already subscribed to this team."
 		}
 		_, sendErr := b.SendMessage(ctx.EffectiveChat.Id, msg, nil)
@@ -114,6 +99,34 @@ func (d Deps) Subscribe(b *gotgbot.Bot, ctx *ext.Context) error {
 	_, err = b.SendMessage(ctx.EffectiveChat.Id,
 		fmt.Sprintf("You are subscribed to match and ticket updates for %s.", team.Name), nil)
 	return err
+}
+
+func (d Deps) resolveSubscribeTeamID(b *gotgbot.Bot, ctx *ext.Context, q string, teams []apiclient.Team) (int64, error) {
+	teamID, err := teamresolve.PickTeam(teams)
+	if err == nil {
+		return teamID, nil
+	}
+	if errors.Is(err, teamresolve.ErrNotFound) {
+		if d.Log != nil {
+			d.Log.Warn("subscribe no team match",
+				slog.String("name_query", q),
+				slog.Int("teams_from_api", len(teams)),
+				slog.String("hint", "GET /teams only returns clubs with at least one team_competitions row; verify the club is linked to a competition or compare with SQL on team_competitions, not teams alone"),
+			)
+		}
+		_, sendErr := b.SendMessage(ctx.EffectiveChat.Id, "No team matched that name.", nil)
+		return 0, sendErr
+	}
+	if errors.Is(err, teamresolve.ErrAmbiguous) {
+		names := make([]string, 0, len(teams))
+		for _, t := range teams {
+			names = append(names, fmt.Sprintf("%s (id %d)", t.Name, t.ID))
+		}
+		_, sendErr := b.SendMessage(ctx.EffectiveChat.Id,
+			"Several teams matched. Please pick a more specific name.\n"+strings.Join(names, "\n"), nil)
+		return 0, sendErr
+	}
+	return 0, err
 }
 
 // Start handles /start with a short help text.

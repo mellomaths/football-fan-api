@@ -260,6 +260,7 @@ func (c *Client) do(req *http.Request, out any, auth bool) error {
 			slog.Bool("auth_header", auth),
 		)
 	}
+	//nolint:gosec // G704 — HTTP requests use configured baseURL plus fixed API paths from this client only.
 	res, err := c.httpClient.Do(req)
 	if err != nil {
 		if c.log != nil {
@@ -300,9 +301,9 @@ func (c *Client) do(req *http.Request, out any, auth bool) error {
 	return nil
 }
 
-func truncateForLog(b []byte, max int) string {
-	if len(b) <= max {
+func truncateForLog(b []byte, maxLen int) string {
+	if len(b) <= maxLen {
 		return string(b)
 	}
-	return string(b[:max]) + "…"
+	return string(b[:maxLen]) + "…"
 }

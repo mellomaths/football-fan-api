@@ -103,7 +103,7 @@ func (s *stubStore) UpsertSubscriber(context.Context, string, string, *string, j
 	return db.Subscriber{}, nil
 }
 
-func (s *stubStore) GetSubscriberByID(_ context.Context, id int64) (db.Subscriber, error) {
+func (s *stubStore) GetSubscriberByID(_ context.Context, _ int64) (db.Subscriber, error) {
 	if s.err != nil {
 		return db.Subscriber{}, s.err
 	}
