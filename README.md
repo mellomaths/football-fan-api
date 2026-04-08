@@ -1,6 +1,6 @@
 # Football Fan API
 
-This repository contains a small system for **scheduled Brazilian football fixtures**: national leagues (e.g. Brasileirão), continental and domestic cups (e.g. Libertadores, Sul-Americana, Copa do Brasil), with room to extend to **estaduais** and other competitions. A **Python** service scrapes public sources and writes to **PostgreSQL**; a **Go** HTTP API reads from the same database for clients.
+This repository contains a small system for **scheduled Brazilian football fixtures**: national leagues (e.g. Brasileirão), continental and domestic cups (e.g. Libertadores, Sul-Americana, Copa do Brasil), with room to extend to **estaduais** and other competitions. A **Python** service scrapes public sources and writes to **PostgreSQL**; a **Go** HTTP API reads from the same database for clients and integrations. An optional **Go** Telegram bot (`bots/telegram/`) calls that API to register subscribers and send scheduled notifications.
 
 ## Requirements
 
@@ -23,11 +23,12 @@ flowchart LR
   Upsert --> PG[(PostgreSQL)]
   API[Go API] --> PG
   Clients[Clients] --> API
+  Bot[Telegram bot] --> API
 ```
 
 - **PostgreSQL** is the single source of truth: `competitions`, **`teams`** (one row per club, globally unique `name`), **`team_competitions`** (many-to-many with optional `season` and exactly one `is_primary` row per team), and **`matches`**, all in schema **`footballfan`** (not `public`).
 - **Scrappers** (`scrappers/`) fetch fixtures, normalize them, and **upsert** rows keyed by `(source, external_match_id)` so re-runs do not duplicate matches.
-- **API** (`api/`) exposes read-only REST endpoints; it does not scrape. SQL migrations run **on API startup** (embedded in the binary).
+- **API** (`api/`) exposes REST endpoints (team/match reads plus subscriber routes for integrations); it does not scrape. SQL migrations run **on API startup** (embedded in the binary).
 
 Data flow: scrapers populate `matches` on a schedule; the API serves `GET /teams`, `GET /teams/{teamId}`, and `GET /teams/{teamId}/matches` for date-bounded queries.
 
@@ -47,8 +48,9 @@ Data flow: scrapers populate `matches` on a schedule; the API serves `GET /teams
 | Path | Role |
 |------|------|
 | `api/` | Go HTTP server, migrations, Dockerfile |
+| `bots/telegram/` | Optional Telegram bot (Go), Dockerfile |
 | `scrappers/` | Python package `football_scrapers`, `uv.lock`, Dockerfile |
-| `docker-compose.yaml` | Postgres + pgAdmin + API + scraper |
+| `docker-compose.yaml` | Postgres + pgAdmin + API + scraper + optional `telegram` |
 | `Justfile` | Shortcuts for local Docker Compose (`just up`, `just logs`, …) |
 | `.env.example` | Template for optional Compose/runtime variables (copy to `.env`; never commit secrets) |
 

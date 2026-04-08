@@ -6,10 +6,11 @@ HTTP API that reads **teams** and **scheduled matches** from PostgreSQL. The ser
 
 ### Environment variables
 
-| Variable       | Required | Default | Description                                                                 |
-| -------------- | -------- | ------- | --------------------------------------------------------------------------- |
-| `DATABASE_URL` | Yes      | —       | PostgreSQL URL (for example `postgres://user:pass@host:5432/dbname?sslmode=disable`) |
-| `HTTP_ADDR`    | No       | `:8080` | Listen address (`host:port` or `:port`)                                     |
+| Variable           | Required | Default | Description                                                                 |
+| ------------------ | -------- | ------- | --------------------------------------------------------------------------- |
+| `DATABASE_URL`     | Yes      | —       | PostgreSQL URL (for example `postgres://user:pass@host:5432/dbname?sslmode=disable`) |
+| `HTTP_ADDR`        | No       | `:8080` | Listen address (`host:port` or `:port`)                                     |
+| `API_INTERNAL_KEY` | No       | —       | When set, required as header `X-API-Key` for subscriber and notification-receipt routes below. If unset, those routes return **503**. |
 
 Copy [.env.example](.env.example) to `.env` in this directory, edit `DATABASE_URL`, then load it in your shell before running:
 
@@ -54,6 +55,10 @@ The server uses Go 1.22 `net/http` `ServeMux` with method-specific patterns:
 - `PATCH /teams/{teamId}` — update `ticket_sale_url` (optional JSON body field)
 - `GET /teams/{teamId}/matches` — matches for a team in a date window
 - `GET /teams/{teamId}/tickets/announcements` — scraped ticket announcement blobs for the team (seller)
+- `POST /users` — upsert a subscriber (requires `X-API-Key` when `API_INTERNAL_KEY` is set)
+- `POST /users/{userId}/subscription` — subscribe a user to a team (`team_id` in JSON body)
+- `GET /users/subscriptions` — list all subscriber / team pairs for dispatch jobs
+- `POST /notification-receipts` — record that a ticket announcement was delivered (idempotent)
 
 Path parameters are read with `Request.PathValue("teamId")`.
 
@@ -72,10 +77,15 @@ Returns a JSON array of teams, ordered by primary competition code then name (sa
 - `short_name`, `espn_slug`, `soccerway_id` — strings from the `teams` row when set; omitted when null or empty in the database
 - `ticket_sale_url` — optional absolute URL used by ticket scrapers (e.g. a club news listing); omitted when unset
 
-Example:
+Optional query parameter:
+
+- `name` — when non-empty (after trimming), only teams whose `name` or `short_name` contains this value as a **case-insensitive substring** are returned. When omitted or blank, all teams are returned (same as before).
+
+Examples:
 
 ```bash
 curl -s http://localhost:8080/teams
+curl -s 'http://localhost:8080/teams?name=Flamengo'
 ```
 
 #### `GET /teams/{teamId}`
@@ -165,6 +175,7 @@ Rules:
 
 Response: JSON array. Each element has:
 
+- `id` — database id of the announcement row (for idempotent delivery tracking)  
 - `sale_schedule_text` — full text of the sale-schedule section from the club article  
 - `prices_text` — full text of the prices / serviços section  
 - `scraped_at` — RFC3339 UTC when the row was last scraped  
@@ -181,6 +192,37 @@ Errors:
 - `400` — missing/invalid `from` or `to`, span over 90 days, or invalid `teamId`
 - `404` — unknown `teamId`
 - `500` — database or internal failure
+
+#### Subscriber and delivery routes (`X-API-Key`)
+
+These routes require header **`X-API-Key: <API_INTERNAL_KEY>`** when the server was started with **`API_INTERNAL_KEY`** set. If the env var is unset, they respond with **`503`**.
+
+##### `POST /users`
+
+Upserts a row in `footballfan.subscribers` by **`external_key`**.
+
+Body (JSON):
+
+- `external_key` (string, required) — stable id for the integration account  
+- `delivery_target` (string, required) — opaque value the client uses later to deliver messages (e.g. a chat id as a string)  
+- `display_name` (string, optional)  
+- `metadata` (object, optional) — stored as JSONB; not interpreted by the API  
+
+Returns **`200`** with the subscriber object including `id`.
+
+##### `POST /users/{userId}/subscription`
+
+Body: `{ "team_id": <int64> }`. Creates a link in `subscriber_team_subscriptions`. Returns **`201`** with `{"status":"created"}`.
+
+Errors: **`404`** if the user id or team id does not exist; **`409`** if the subscription already exists.
+
+##### `GET /users/subscriptions`
+
+Returns a JSON array of `{ "subscriber_id", "delivery_target", "team_id" }` for all subscriptions.
+
+##### `POST /notification-receipts`
+
+Body: `{ "subscriber_id": <int64>, "announcement_id": <int64> }`. Inserts a dedupe row if missing. Returns **`200`** with `{ "inserted": true }` or `{ "inserted": false }` if it was already recorded.
 
 ### Migrations
 

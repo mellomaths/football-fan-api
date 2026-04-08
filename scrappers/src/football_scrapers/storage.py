@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 import psycopg
+from psycopg import errors as pg_errors
 from psycopg import sql
 from psycopg.rows import dict_row
 
@@ -152,6 +153,14 @@ def upsert_team_metadata(
 _DOMESTIC_LEAGUES = frozenset({"BRASILEIRAO_A", "BRASILEIRAO_B"})
 
 
+def _clear_primary_for_team(cur: psycopg.Cursor, team_id: int) -> None:
+    """At most one row per team may have is_primary (partial unique index)."""
+    cur.execute(
+        sql.SQL("UPDATE {} SET is_primary = false WHERE team_id = %s").format(table("team_competitions")),
+        (team_id,),
+    )
+
+
 def link_team_competition(
     conn: psycopg.Connection,
     team_id: int,
@@ -160,37 +169,89 @@ def link_team_competition(
     competition_code: str,
 ) -> None:
     """Ensure team_id is linked to competition_id; set is_primary per competition tier."""
-    if competition_code in _DOMESTIC_LEAGUES:
+    domestic = competition_code in _DOMESTIC_LEAGUES
+    try:
         with conn.cursor() as cur:
+            if domestic:
+                _clear_primary_for_team(cur, team_id)
+                cur.execute(
+                    sql.SQL("""
+                    INSERT INTO {} (team_id, competition_id, is_primary)
+                    VALUES (%s, %s, true)
+                    ON CONFLICT (team_id, competition_id) DO UPDATE SET is_primary = true
+                    """).format(table("team_competitions")),
+                    (team_id, competition_id),
+                )
+                log.info(
+                    "team_competition linked (domestic) team_id=%s competition_id=%s code=%s rowcount=%s",
+                    team_id,
+                    competition_id,
+                    competition_code,
+                    cur.rowcount,
+                )
+                return
+
+            # Cup / international: re-scrapes call link every fixture. If this pair already exists,
+            # skip — do not recompute is_primary from COUNT() (that would falsely demote the only primary row).
             cur.execute(
-                sql.SQL("UPDATE {} SET is_primary = false WHERE team_id = %s").format(table("team_competitions")),
+                sql.SQL(
+                    "SELECT 1 FROM {} WHERE team_id = %s AND competition_id = %s LIMIT 1"
+                ).format(table("team_competitions")),
+                (team_id, competition_id),
+            )
+            if cur.fetchone():
+                log.debug(
+                    "team_competition already present, skip team_id=%s competition_id=%s code=%s",
+                    team_id,
+                    competition_id,
+                    competition_code,
+                )
+                return
+
+            cur.execute(
+                sql.SQL("SELECT COUNT(*)::int AS n FROM {} WHERE team_id = %s").format(table("team_competitions")),
                 (team_id,),
             )
+            row = cur.fetchone()
+            n = int(row["n"]) if row else 0  # type: ignore[index]
+            is_primary = n == 0
+            # Setting is_primary=true must not violate uq_team_competitions_one_primary (one true per team).
+            if is_primary:
+                _clear_primary_for_team(cur, team_id)
             cur.execute(
                 sql.SQL("""
                 INSERT INTO {} (team_id, competition_id, is_primary)
-                VALUES (%s, %s, true)
-                ON CONFLICT (team_id, competition_id) DO UPDATE SET is_primary = true
+                VALUES (%s, %s, %s)
+                ON CONFLICT (team_id, competition_id) DO NOTHING
                 """).format(table("team_competitions")),
-                (team_id, competition_id),
+                (team_id, competition_id, is_primary),
             )
-        return
-    with conn.cursor() as cur:
-        cur.execute(
-            sql.SQL("SELECT COUNT(*)::int AS n FROM {} WHERE team_id = %s").format(table("team_competitions")),
-            (team_id,),
+            log.info(
+                "team_competition linked (cup/intl) team_id=%s competition_id=%s code=%s is_primary=%s rowcount=%s",
+                team_id,
+                competition_id,
+                competition_code,
+                is_primary,
+                cur.rowcount,
+            )
+    except pg_errors.UniqueViolation as exc:
+        log.error(
+            "team_competition insert failed (unique) team_id=%s competition_id=%s code=%s: %s",
+            team_id,
+            competition_id,
+            competition_code,
+            exc.diag.message_detail or exc.diag.message_primary or str(exc),
         )
-        row = cur.fetchone()
-        n = int(row["n"]) if row else 0  # type: ignore[index]
-        is_primary = n == 0
-        cur.execute(
-            sql.SQL("""
-            INSERT INTO {} (team_id, competition_id, is_primary)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (team_id, competition_id) DO NOTHING
-            """).format(table("team_competitions")),
-            (team_id, competition_id, is_primary),
+        raise
+    except pg_errors.ForeignKeyViolation as exc:
+        log.error(
+            "team_competition insert failed (fk) team_id=%s competition_id=%s code=%s: %s",
+            team_id,
+            competition_id,
+            competition_code,
+            exc.diag.message_detail or str(exc),
         )
+        raise
 
 
 def register_team(lookup: TeamLookup, competition_code: str, name: str, team_id: int) -> None:
