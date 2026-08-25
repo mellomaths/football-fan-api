@@ -7,7 +7,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/bot ./cmd/bot
 
 FROM alpine:3.20
 # hadolint DL3018: pin versions for reproducible image builds (bump when Alpine updates packages)
-RUN apk add --no-cache ca-certificates=20250911-r0 tzdata=2026a-r0
+RUN apk add --no-cache ca-certificates=20260413-r0 tzdata=2026b-r0
 COPY --from=build /out/bot /bot
 USER nobody
 ENTRYPOINT ["/bot"]
